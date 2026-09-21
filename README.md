@@ -9,13 +9,14 @@
 - 記錄繳款日期與金額，查看支出、已繳與差額
 - 從試算表複製三欄資料貼上，預覽後批次匯入
 - 儲存密碼鎖定的 PDF 原檔至私人 Supabase Storage bucket；不解析 PDF
-- 分類支出圖表與手機優先版面
+- 分類支出圓餅圖與每日支出折線圖，可切換
+- 帳號設定：顯示名稱、更改密碼、忘記密碼
 - 多本帳本：用邀請連結邀請家人加入，每筆消費可記「誰付的、分給誰」（平均分攤），分帳頁算出誰該給誰多少，按「月結」記為已付款
 
 ## 你需要建立的服務
 
 1. **Supabase Free 專案**：以自己的帳號註冊，建立一個新 project。區域建議選靠近台灣的可用區域。請自行妥善保存 Supabase 帳號密碼與資料庫密碼。
-2. 在 Supabase 的 **SQL Editor** 依序執行 `supabase/schema.sql` 與 `supabase/002_shared_ledgers.sql`（各執行一次）。會建立資料表、共享帳本、私人 PDF bucket 與 RLS 存取規則。
+2. 在 Supabase 的 **SQL Editor** 依序執行 `supabase/schema.sql`、`supabase/002_shared_ledgers.sql` 與 `supabase/003_member_rename.sql`（各執行一次）。會建立資料表、共享帳本、私人 PDF bucket 與 RLS 存取規則。
 3. 在 **Project Settings → API** 複製 Project URL 與 publishable key。只使用 publishable key，**不要提供 service_role／secret key、資料庫密碼或 Gmail 密碼**。
 4. 在 **Authentication → URL Configuration** 設定 Site URL 為 Netlify 網址；加入本機 `http://localhost:5173/**` 與正式網址作為允許的 redirect URL。註冊信驗證連結要能回到網站。
 5. **Netlify Free**：註冊並連接此專案的 Git repository。Build command: `npm run build`；Publish directory: `dist`。在 Site 的 Environment variables 設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY`。環境變數變更後重新部署。
@@ -56,7 +57,7 @@ npm run dev
 
 ## 帳單與資料安全
 
-Supabase 內建寄信服務只寄給專案團隊成員，家人收不到註冊驗證信，因此本專案已在 **Authentication → Sign In / Providers** 關閉 Confirm email。家人都註冊完成後，建議關閉 **Allow new users to sign up**。
+「忘記密碼」寄出的重設信同樣受限於寄信服務：Supabase 內建寄信服務只寄給專案團隊成員，家人收不到註冊驗證信，因此本專案已在 **Authentication → Sign In / Providers** 關閉 Confirm email。家人都註冊完成後，建議關閉 **Allow new users to sign up**。
 
 邀請連結等同帳本鑰匙，拿到的人登入後即可加入；只傳給信任的人。PDF 帳單不會跟著帳本共享，只有上傳者看得到。
 

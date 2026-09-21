@@ -6,9 +6,9 @@ import dayjs from 'dayjs'
 import { groupBy, sumBy } from 'lodash-es'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
-import { PieChart } from 'echarts/charts'
+import { LineChart, PieChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
-import { LegendComponent, TooltipComponent } from 'echarts/components'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { useAuthStore } from '../stores/auth.js'
 import { nameFor, useLedgerStore } from '../stores/ledger.js'
 import { CATEGORIES, parsePastedRows } from '../utils/import.js'
@@ -16,7 +16,7 @@ import { splitSummary } from '../utils/split.js'
 import TransactionDialog from '../components/TransactionDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
-use([PieChart, CanvasRenderer, LegendComponent, TooltipComponent])
+use([PieChart, LineChart, CanvasRenderer, GridComponent, LegendComponent, TooltipComponent])
 const router = useRouter()
 const route = useRoute()
 const $q = useQuasar()
@@ -28,6 +28,10 @@ const transactionOpen = ref(false)
 const paymentOpen = ref(false)
 const importOpen = ref(false)
 const ledgerOpen = ref(false)
+const accountOpen = ref(false)
+const chartMode = ref('pie')
+const displayName = ref('')
+const newPassword = ref('')
 const newLedgerName = ref('')
 const editing = ref(null)
 const busy = ref(false)
@@ -52,15 +56,38 @@ const chartData = computed(() => {
   const byCategory = groupBy(ledger.transactions.filter((tx) => Number(tx.amount) > 0), 'category')
   return Object.entries(byCategory).map(([name, rows]) => ({ name, value: sumBy(rows, (tx) => Number(tx.amount)) }))
 })
-const chartOptions = computed(() => ({
+// Every day of the month, so gaps in spending stay visible instead of being collapsed.
+const dailyTotals = computed(() => {
+  const start = dayjs(month.value).startOf('month')
+  const byDate = groupBy(ledger.transactions, 'spent_at')
+  return Array.from({ length: start.daysInMonth() }, (_, index) => {
+    const date = start.add(index, 'day').format('YYYY-MM-DD')
+    return { date, label: start.add(index, 'day').format('M/D'), value: sumBy(byDate[date] ?? [], (tx) => Number(tx.amount)) }
+  })
+})
+const pieOptions = computed(() => ({
   backgroundColor: 'transparent',
   color: ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92', '#c4d192', '#d9a6c8', '#889796'],
   tooltip: { trigger: 'item', formatter: '{b}: NT$ {c} ({d}%)' },
   legend: { bottom: 0, icon: 'circle', textStyle: { color: '#b0bdb6', fontSize: 11 }, itemWidth: 8, itemHeight: 8 },
   series: [{ type: 'pie', radius: ['55%', '77%'], center: ['50%', '42%'], itemStyle: { borderColor: '#17202a', borderWidth: 3 }, label: { show: false }, data: chartData.value }],
 }))
+const lineOptions = computed(() => ({
+  backgroundColor: 'transparent',
+  grid: { left: 46, right: 14, top: 18, bottom: 26 },
+  tooltip: { trigger: 'axis', formatter: (rows) => `${rows[0].axisValue}：${money(rows[0].data)}` },
+  xAxis: { type: 'category', boundaryGap: false, data: dailyTotals.value.map((day) => day.label), axisLabel: { color: '#8d9f96', fontSize: 10, interval: 4 }, axisLine: { lineStyle: { color: '#26323a' } } },
+  yAxis: { type: 'value', axisLabel: { color: '#8d9f96', fontSize: 10, formatter: (value) => (Math.abs(value) >= 1000 ? `${value / 1000}k` : value) }, splitLine: { lineStyle: { color: '#1e2b33' } } },
+  series: [{ type: 'line', smooth: true, showSymbol: false, data: dailyTotals.value.map((day) => day.value), itemStyle: { color: '#a8eea0' }, areaStyle: { color: 'rgba(168, 238, 160, .12)' } }],
+}))
+const chartOptions = computed(() => (chartMode.value === 'pie' ? pieOptions.value : lineOptions.value))
 
 watch([month, () => ledger.currentId], refresh)
+watch(() => auth.recovering, (value) => {
+  if (!value) return
+  openAccount()
+  $q.notify({ type: 'warning', message: '請設定新的密碼', timeout: 8000 })
+})
 onMounted(async () => {
   ledger.currentId = null // the store outlives this view; reset so re-opening the same ledger still reloads
   try {
@@ -194,6 +221,33 @@ function settleMonth() {
     } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
   })
 }
+function openAccount() {
+  displayName.value = ledger.members.find((member) => member.user_id === auth.user?.id)?.display_name ?? ''
+  newPassword.value = ''
+  accountOpen.value = true
+}
+async function saveDisplayName() {
+  const name = displayName.value.trim()
+  if (!name || name === ledger.members.find((member) => member.user_id === auth.user?.id)?.display_name) return
+  busy.value = true
+  try {
+    await ledger.renameMember(name, auth.user)
+    $q.notify({ type: 'positive', message: '顯示名稱已更新' })
+  } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  finally { busy.value = false }
+}
+async function savePassword() {
+  if (newPassword.value.length < 8) return
+  busy.value = true
+  try {
+    await auth.updatePassword(newPassword.value)
+    newPassword.value = ''
+    accountOpen.value = false
+    $q.notify({ type: 'positive', message: '密碼已更新' })
+  } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  finally { busy.value = false }
+}
+
 async function logout() {
   try { await auth.signOut(); await router.replace('/login') }
   catch (error) { $q.notify({ type: 'negative', message: error.message }) }
@@ -211,7 +265,7 @@ async function logout() {
     </header>
 
     <main class="content">
-      <div class="welcome"><div><p class="eyebrow">MONTHLY OVERVIEW</p><h1>這個月，花得有數。</h1></div><span class="avatar">{{ auth.user?.email?.[0]?.toUpperCase() }}</span></div>
+      <div class="welcome"><div><p class="eyebrow">MONTHLY OVERVIEW</p><h1>這個月，花得有數。</h1></div><button class="avatar" aria-label="帳號設定" @click="openAccount">{{ auth.user?.email?.[0]?.toUpperCase() }}</button></div>
 
       <section class="month-panel" aria-label="選擇帳單月份">
         <q-btn flat round icon="chevron_left" aria-label="上個月" @click="shiftMonth(-1)" />
@@ -252,7 +306,13 @@ async function logout() {
             <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
           </div>
         </section>
-        <section v-if="chartData.length" class="chart-card"><div class="section-head"><h2>支出分類</h2></div><VChart class="chart" :option="chartOptions" autoresize /></section>
+        <section v-if="chartData.length" class="chart-card">
+          <div class="section-head">
+            <h2>{{ chartMode === 'pie' ? '支出分類' : '每日支出' }}</h2>
+            <div class="chart-toggle"><button :class="{ active: chartMode === 'pie' }" @click="chartMode = 'pie'">圓餅圖</button><button :class="{ active: chartMode === 'line' }" @click="chartMode = 'line'">折線圖</button></div>
+          </div>
+          <VChart class="chart" :option="chartOptions" autoresize />
+        </section>
       </template>
       <template v-else-if="tab === 'payments'">
         <div v-if="!ledger.payments.length" class="empty"><q-icon name="payments" size="36px" /><p>尚未記錄繳款</p><button @click="paymentOpen = true">新增繳款</button></div>
@@ -311,6 +371,18 @@ async function logout() {
         <q-btn class="import-button" unelevated no-caps :disable="!draftValid" :loading="busy" :label="draft.length ? `確認匯入 ${draft.length} 筆` : '確認匯入'" @click="importRows" />
       </q-card>
     </q-dialog>
+    <q-dialog v-model="accountOpen" position="bottom">
+      <q-card class="import-sheet">
+        <div class="sheet-head"><h2>帳號設定</h2><q-btn flat round icon="close" aria-label="關閉" @click="accountOpen = false" /></div>
+        <p>登入帳號：{{ auth.user?.email }}</p>
+        <h3 class="sheet-title">顯示名稱</h3>
+        <p>家人在帳本裡看到的名字，所有帳本共用。</p>
+        <form class="field-row" @submit.prevent="saveDisplayName"><q-input v-model="displayName" outlined dense maxlength="30" placeholder="例如：Howard" class="grow" /><q-btn type="submit" unelevated no-caps class="small-button" :loading="busy" :disable="!displayName.trim()" label="儲存" /></form>
+        <h3 class="sheet-title">更改密碼</h3>
+        <p>至少 8 個字元。更新後其他裝置仍保持登入。</p>
+        <form class="field-row" @submit.prevent="savePassword"><q-input v-model="newPassword" outlined dense type="password" autocomplete="new-password" placeholder="新密碼" class="grow" /><q-btn type="submit" unelevated no-caps class="small-button" :loading="busy" :disable="newPassword.length < 8" label="更新" /></form>
+      </q-card>
+    </q-dialog>
     <q-dialog v-model="ledgerOpen" position="bottom">
       <q-card class="import-sheet">
         <div class="sheet-head"><h2>{{ ledger.current?.name }}</h2><q-btn flat round icon="close" aria-label="關閉" @click="ledgerOpen = false" /></div>
@@ -337,7 +409,7 @@ async function logout() {
 .welcome { display: flex; justify-content: space-between; align-items: center; margin: 10px 0 26px; }
 .eyebrow { color: #a8eea0; letter-spacing: .2em; font-weight: 700; font-size: 10px; margin: 0 0 7px; }
 h1 { font-size: clamp(23px, 5vw, 34px); line-height: 1.3; letter-spacing: -.04em; margin: 0; }
-.avatar { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; background: #263832; color: #c1f2ad; font-weight: 700; }
+.avatar { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; background: #263832; color: #c1f2ad; font-weight: 700; border: 0; font-size: 15px; font-family: inherit; cursor: pointer; }
 .month-panel { height: 62px; border: 1px solid #25323b; border-radius: 16px; display: flex; align-items: center; justify-content: space-between; background: #151d27; margin-bottom: 14px; }
 .month-panel div { display: flex; align-items: baseline; gap: 12px; }
 .month-panel span { color: #81948d; font-size: 12px; }
@@ -364,17 +436,20 @@ h2 { margin: 0; font-size: 19px; }
 .empty { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #799087; gap: 8px; text-align: center; }
 .empty p { margin: 2px 0; }
 .empty button { background: transparent; color: #a8eea0; border: 0; cursor: pointer; font: inherit; }
-.transaction-group h3 { color: #8d9f96; font-size: 12px; font-weight: 500; margin: 22px 0 8px; }
-.list-row { display: flex; align-items: center; gap: 12px; background: #151d26; border: 1px solid #1e2b33; border-radius: 13px; padding: 13px 14px; margin: 7px 0; min-width: 0; }
-.category-icon { flex: 0 0 39px; height: 39px; display: grid; place-items: center; border-radius: 12px; background: #293831; color: #b7e7b0; font-size: 13px; font-weight: 700; }
-.row-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.transaction-group h3 { color: #8d9f96; font-size: 12px; font-weight: 500; margin: 14px 0 5px; }
+.list-row { display: flex; align-items: center; gap: 10px; background: #151d26; border: 1px solid #1e2b33; border-radius: 11px; padding: 8px 11px; margin: 4px 0; min-width: 0; }
+.category-icon { flex: 0 0 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: #293831; color: #b7e7b0; font-size: 12px; font-weight: 700; }
+.row-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .row-copy strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; }
 .row-copy small { color: #84978d; font-size: 11px; }
-.row-end { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; gap: 5px; }
+.row-end { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; gap: 2px; }
 .row-end strong { font-size: 13px; }
 .row-buttons { display: flex; justify-content: flex-end; gap: 9px; }
+.chart-toggle { display: flex; gap: 4px; }
+.chart-toggle button { border: 1px solid #2b3940; background: transparent; color: #9aaba4; border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 12px; cursor: pointer; }
+.chart-toggle button.active { background: #263832; border-color: #3c5748; color: #c1f2ad; font-weight: 700; }
 .row-buttons button, .row-end > button { padding: 0; background: none; border: 0; color: #84978d; cursor: pointer; font-size: 11px; }
-.chart-card { background: #151d26; border: 1px solid #1e2b33; padding: 20px; border-radius: 18px; margin-top: 25px; }
+.chart-card { background: #151d26; border: 1px solid #1e2b33; padding: 16px; border-radius: 18px; margin-top: 18px; }
 .chart { height: 260px; }
 .upload-card { background: #151d26; border: 1px solid #25323b; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .upload-card h3 { margin: 0; font-size: 16px; }

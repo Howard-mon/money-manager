@@ -17,6 +17,20 @@ const message = ref('')
 // Only in-app paths, e.g. an invite link that sent the user here.
 const next = () => (typeof route.query.redirect === 'string' && /^\/(?!\/)/.test(route.query.redirect) ? route.query.redirect : '/')
 
+function forgotPassword() {
+  $q.dialog({
+    title: '重設密碼',
+    message: '輸入註冊時使用的電子郵件，我們會寄出重設連結。',
+    prompt: { model: email.value.trim(), type: 'email', isValid: (value) => /.+@.+\..+/.test(value.trim()) },
+    cancel: true,
+  }).onOk(async (value) => {
+    try {
+      await auth.sendPasswordReset(value.trim())
+      message.value = '重設密碼的信已寄出，請到信箱點擊連結。若三分鐘內沒收到，請確認垃圾信件匣。'
+    } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  })
+}
+
 async function submit() {
   message.value = ''
   busy.value = true
@@ -39,7 +53,7 @@ async function submit() {
 
 <template>
   <main class="login-page">
-    <div class="brand"><span class="brand-mark">◒</span> 月光帳本</div>
+    <div class="brand"><span class="brand-mark">◒</span> 月月存帳本</div>
     <section class="login-card">
       <div class="eyebrow">YOUR PRIVATE LEDGER</div>
       <h1>每一筆日常，<br /><em>都能看得清楚。</em></h1>
@@ -59,6 +73,7 @@ async function submit() {
           <q-input id="email" v-model="email" outlined dense type="email" autocomplete="email" placeholder="name@example.com" :rules="[(v) => !!v || '請輸入電子郵件']" />
           <label for="password">密碼</label>
           <q-input id="password" v-model="password" outlined dense type="password" :autocomplete="mode === 'signup' ? 'new-password' : 'current-password'" placeholder="至少 8 個字元" :rules="[(v) => (v && v.length >= 8) || '至少 8 個字元']" />
+          <button v-if="mode === 'signin'" type="button" class="link-button" @click="forgotPassword">忘記密碼？</button>
           <p v-if="message" class="success" role="status">{{ message }}</p>
           <q-btn class="submit" type="submit" unelevated no-caps :loading="busy" :label="mode === 'signup' ? '建立帳號' : '登入帳本'" />
         </form>
@@ -82,7 +97,8 @@ h1 em { color: #a8eea0; font-style: normal; }
 .mode-tabs button.active { background: #303d42; color: #f5fff3; font-weight: 700; }
 label { display: block; margin: 18px 0 8px; font-size: 13px; color: #cdd9d3; }
 .submit { width: 100%; margin-top: 22px; background: #a8eea0; color: #17271b; height: 48px; border-radius: 12px; font-weight: 700; }
-.success { color: #a8eea0; }
+.success { color: #a8eea0; line-height: 1.7; }
+.link-button { background: none; border: 0; color: #9fb3a6; font: inherit; font-size: 13px; padding: 6px 0; cursor: pointer; text-decoration: underline; }
 .setup-note { padding: 18px; border: 1px solid #506648; border-radius: 14px; color: #d1dfd1; line-height: 1.8; overflow-wrap: anywhere; }
 .footnote { text-align: center; color: #667672; font-size: 12px; }
 </style>

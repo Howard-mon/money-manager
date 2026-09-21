@@ -61,6 +61,13 @@ export const useLedgerStore = defineStore('ledger', () => {
     await loadLedgers(user)
   }
 
+  // display_name lives per membership, so renaming updates every ledger this user belongs to.
+  async function renameMember(name, user) {
+    const { error } = await supabase.from('ledger_members').update({ display_name: name }).eq('user_id', user.id)
+    if (error) throw error
+    await loadLedgers(user)
+  }
+
   async function load(month, userId) {
     const loadId = ++latestLoad
     loading.value = true
@@ -148,7 +155,7 @@ export const useLedgerStore = defineStore('ledger', () => {
 
   return {
     ledgers, currentId, current, members, transactions, payments, settlements, statements, loading,
-    loadLedgers, selectLedger, createLedger, joinLedger, load,
+    loadLedgers, selectLedger, createLedger, joinLedger, renameMember, load,
     saveTransaction, importTransactions, deleteTransaction, savePayment, deletePayment,
     saveSettlements, deleteSettlement, uploadStatement, statementUrl,
   }
