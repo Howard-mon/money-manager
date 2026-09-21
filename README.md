@@ -20,6 +20,15 @@
 4. 在 **Authentication → URL Configuration** 設定 Site URL 為 Netlify 網址；加入本機 `http://localhost:5173/**` 與正式網址作為允許的 redirect URL。註冊信驗證連結要能回到網站。
 5. **Netlify Free**：註冊並連接此專案的 Git repository。Build command: `npm run build`；Publish directory: `dist`。在 Site 的 Environment variables 設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY`。環境變數變更後重新部署。
 
+## 部署
+
+正式站：<https://savermoney.netlify.app>（Netlify，連結 GitHub `main` 分支自動建置）。
+
+- Build command `npm run build`，Publish directory `dist`，設定在 `netlify.toml`。
+- Netlify 的環境變數需設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY`；變更後要重新建置才會生效。
+- Supabase 的 **Authentication → URL Configuration** 需包含正式網址、分支預覽網址與 `http://localhost:5173/**`。
+- Netlify 免費方案不允許從 private repo 自動建置，因此本 repo 為公開。程式碼不含任何金鑰，`.env` 已被忽略。
+
 ## 本機執行
 
 ```bash
