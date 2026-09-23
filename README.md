@@ -1,4 +1,4 @@
-# 月光帳本
+# 搭夥帳
 
 手機優先的私人信用卡月帳本。使用 Vue 3、Quasar Dark Mode、Pinia、Vue Router、ECharts、vue-datepicker、Supabase 與 Netlify。全專案使用 JavaScript，元件使用 `<script setup>` 與 scoped SCSS。
 

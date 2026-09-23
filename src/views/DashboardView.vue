@@ -314,7 +314,7 @@ async function logout() {
       </section>
 
       <section class="balance-card" aria-label="本月支出摘要">
-        <div class="balance-decor">✳</div>
+        <svg class="balance-decor" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 0c4 30 16 46 50 50-34 4-46 20-50 50-4-30-16-46-50-50 34-4 46-20 50-50Z" /></svg>
         <p>本月總支出</p>
         <div class="balance-value">{{ money(total) }}</div>
         <div class="balance-divider"></div>
@@ -508,7 +508,7 @@ h1 { font-size: clamp(23px, 5vw, 34px); line-height: 1.3; letter-spacing: -.04em
 .balance-card { position: relative; overflow: hidden; background: linear-gradient(135deg, #253d33, #1d352f 54%, #233c48); border: 1px solid #3c5748; border-radius: 20px; padding: 23px 24px 22px; }
 .balance-card p { color: #bdd8c7; font-size: 13px; margin: 0 0 12px; }
 .balance-value { font-size: clamp(30px, 8vw, 47px); font-weight: 700; letter-spacing: -.045em; line-height: 1.2; }
-.balance-decor { position: absolute; right: -8px; top: -35px; color: #ffffff0d; font-size: 165px; line-height: 1; }
+.balance-decor { position: absolute; right: -14px; top: -26px; width: 150px; height: 150px; fill: #ffffff0f; pointer-events: none; }
 .balance-divider { border-top: 1px solid #ffffff2b; margin: 22px 0 17px; }
 .balance-row { display: flex; gap: 30px; }
 .balance-row div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

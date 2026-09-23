@@ -53,7 +53,7 @@ async function submit() {
 
 <template>
   <main class="login-page">
-    <div class="brand"><span class="brand-mark">◒</span> 月月存帳本</div>
+    <div class="brand"><span class="brand-mark">◒</span> 搭夥帳</div>
     <section class="login-card">
       <div class="eyebrow">YOUR PRIVATE LEDGER</div>
       <h1>每一筆日常，<br /><em>都能看得清楚。</em></h1>
