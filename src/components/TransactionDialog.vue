@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
-import { CATEGORIES } from '../utils/import.js'
+import { CATEGORIES, METHODS } from '../utils/import.js'
 
 const props = defineProps({ modelValue: Boolean, transaction: { type: Object, default: null }, month: { type: String, required: true }, busy: Boolean, members: { type: Array, default: () => [] }, me: { type: String, default: null } })
 const emit = defineEmits(['update:modelValue', 'save'])
@@ -12,6 +12,7 @@ const merchant = ref('')
 const amount = ref('')
 const category = ref('餐飲')
 const cardName = ref('')
+const method = ref('card')
 const note = ref('')
 const paidBy = ref(null)
 const splitAmong = ref([])
@@ -27,6 +28,7 @@ watch(() => props.modelValue, (value) => {
   amount.value = tx?.amount ?? ''
   category.value = tx?.category ?? '餐飲'
   cardName.value = tx?.card_name ?? ''
+  method.value = tx?.method ?? 'card'
   note.value = tx?.note ?? ''
   paidBy.value = tx?.paid_by ?? props.me
   splitAmong.value = tx?.split_among ?? props.members.map((member) => member.user_id)
@@ -41,7 +43,8 @@ function submit() {
     merchant: merchant.value.trim(),
     amount: Number(amount.value),
     category: category.value,
-    card_name: cardName.value.trim() || null,
+    method: method.value,
+    card_name: method.value === 'card' ? cardName.value.trim() || null : null,
     note: note.value.trim() || null,
     paid_by: paidBy.value,
     split_among: splitAmong.value,
@@ -68,9 +71,11 @@ function submit() {
           <q-option-group v-model="splitAmong" type="checkbox" inline :options="memberOptions" />
           <p v-if="!splitAmong.length" class="error" role="alert">至少選一位分攤成員</p>
         </template>
+        <label>付款方式</label>
+        <q-btn-toggle v-model="method" no-caps unelevated spread toggle-color="primary" text-color="white" color="dark" :options="METHODS" />
         <div class="row-fields">
           <div><label>分類</label><q-select v-model="category" outlined dense :options="CATEGORIES" /></div>
-          <div><label>信用卡暱稱</label><q-input v-model="cardName" outlined dense maxlength="50" placeholder="選填" /></div>
+          <div v-if="method === 'card'"><label>信用卡暱稱</label><q-input v-model="cardName" outlined dense maxlength="50" placeholder="選填" /></div>
         </div>
         <label>備註</label>
         <q-input v-model="note" outlined dense maxlength="300" placeholder="選填" />

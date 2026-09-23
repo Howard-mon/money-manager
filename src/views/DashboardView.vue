@@ -6,17 +6,17 @@ import dayjs from 'dayjs'
 import { groupBy, sumBy } from 'lodash-es'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
-import { LineChart, PieChart } from 'echarts/charts'
+import { BarChart, PieChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { useAuthStore } from '../stores/auth.js'
 import { nameFor, useLedgerStore } from '../stores/ledger.js'
-import { CATEGORIES, parsePastedRows } from '../utils/import.js'
+import { CATEGORIES, METHODS, parsePastedRows } from '../utils/import.js'
 import { splitSummary } from '../utils/split.js'
 import TransactionDialog from '../components/TransactionDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
-use([PieChart, LineChart, CanvasRenderer, GridComponent, LegendComponent, TooltipComponent])
+use([PieChart, BarChart, CanvasRenderer, GridComponent, LegendComponent, TooltipComponent])
 const router = useRouter()
 const route = useRoute()
 const $q = useQuasar()
@@ -30,6 +30,9 @@ const importOpen = ref(false)
 const ledgerOpen = ref(false)
 const accountOpen = ref(false)
 const chartMode = ref('pie')
+const query = ref('')
+const sortBy = ref('date')
+const categoryFilter = ref('')
 const displayName = ref('')
 const newPassword = ref('')
 const newLedgerName = ref('')
@@ -39,10 +42,26 @@ const paste = ref('')
 const uploadedFile = ref(null)
 const currency = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
 
+const PALETTE = ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92', '#c4d192', '#d9a6c8', '#889796']
 const total = computed(() => sumBy(ledger.transactions, (tx) => Number(tx.amount)))
+const cardTotal = computed(() => sumBy(ledger.transactions.filter((tx) => (tx.method ?? 'card') === 'card'), (tx) => Number(tx.amount)))
 const paid = computed(() => sumBy(ledger.payments, (payment) => Number(payment.amount)))
-const outstanding = computed(() => total.value - paid.value)
-const grouped = computed(() => groupBy(ledger.transactions, 'spent_at'))
+const outstanding = computed(() => cardTotal.value - paid.value)
+const visibleTransactions = computed(() => {
+  const keyword = query.value.trim().toLowerCase()
+  const rows = ledger.transactions.filter((tx) => {
+    if (categoryFilter.value && tx.category !== categoryFilter.value) return false
+    if (!keyword) return true
+    return `${tx.merchant} ${tx.category} ${tx.card_name ?? ''} ${tx.note ?? ''}`.toLowerCase().includes(keyword)
+  })
+  if (sortBy.value === 'amount') return [...rows].sort((a, b) => Number(b.amount) - Number(a.amount))
+  if (sortBy.value === 'category') {
+    return [...rows].sort((a, b) => a.category.localeCompare(b.category, 'zh-Hant') || Number(b.amount) - Number(a.amount))
+  }
+  return rows
+})
+const grouped = computed(() => groupBy(visibleTransactions.value, 'spent_at'))
+const usedCategories = computed(() => [...new Set(ledger.transactions.map((tx) => tx.category))].sort((a, b) => a.localeCompare(b, 'zh-Hant')))
 const parsed = computed(() => parsePastedRows(paste.value, month.value))
 // Editable copy of the parsed rows; re-pasting or switching month starts over from the parser.
 const draft = ref([])
@@ -52,35 +71,34 @@ const draftValid = computed(() => draft.value.length > 0 && !parsed.value.errors
 const shared = computed(() => ledger.members.length > 1)
 const summary = computed(() => splitSummary(ledger.transactions, ledger.settlements))
 const inviteLink = computed(() => `${location.origin}/join/${ledger.current?.invite_code ?? ''}`)
+// Spending only: refunds would make a share of the total meaningless.
 const chartData = computed(() => {
   const byCategory = groupBy(ledger.transactions.filter((tx) => Number(tx.amount) > 0), 'category')
-  return Object.entries(byCategory).map(([name, rows]) => ({ name, value: sumBy(rows, (tx) => Number(tx.amount)) }))
+  const rows = Object.entries(byCategory).map(([name, items]) => ({ name, value: sumBy(items, (tx) => Number(tx.amount)) }))
+  return rows.sort((a, b) => b.value - a.value)
 })
-// Every day of the month, so gaps in spending stay visible instead of being collapsed.
-const dailyTotals = computed(() => {
-  const start = dayjs(month.value).startOf('month')
-  const byDate = groupBy(ledger.transactions, 'spent_at')
-  return Array.from({ length: start.daysInMonth() }, (_, index) => {
-    const date = start.add(index, 'day').format('YYYY-MM-DD')
-    return { date, label: start.add(index, 'day').format('M/D'), value: sumBy(byDate[date] ?? [], (tx) => Number(tx.amount)) }
-  })
-})
+const chartTotal = computed(() => sumBy(chartData.value, 'value'))
+const breakdown = computed(() => chartData.value.map((row, index) => ({
+  ...row,
+  share: chartTotal.value ? (row.value / chartTotal.value) * 100 : 0,
+  color: PALETTE[index % PALETTE.length],
+})))
 const pieOptions = computed(() => ({
   backgroundColor: 'transparent',
-  color: ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92', '#c4d192', '#d9a6c8', '#889796'],
+  color: PALETTE,
   tooltip: { trigger: 'item', formatter: '{b}: NT$ {c} ({d}%)' },
   legend: { bottom: 0, icon: 'circle', textStyle: { color: '#b0bdb6', fontSize: 11 }, itemWidth: 8, itemHeight: 8 },
   series: [{ type: 'pie', radius: ['55%', '77%'], center: ['50%', '42%'], itemStyle: { borderColor: '#17202a', borderWidth: 3 }, label: { show: false }, data: chartData.value }],
 }))
-const lineOptions = computed(() => ({
+const barOptions = computed(() => ({
   backgroundColor: 'transparent',
-  grid: { left: 46, right: 14, top: 18, bottom: 26 },
-  tooltip: { trigger: 'axis', formatter: (rows) => `${rows[0].axisValue}：${money(rows[0].data)}` },
-  xAxis: { type: 'category', boundaryGap: false, data: dailyTotals.value.map((day) => day.label), axisLabel: { color: '#8d9f96', fontSize: 10, interval: 4 }, axisLine: { lineStyle: { color: '#26323a' } } },
-  yAxis: { type: 'value', axisLabel: { color: '#8d9f96', fontSize: 10, formatter: (value) => (Math.abs(value) >= 1000 ? `${value / 1000}k` : value) }, splitLine: { lineStyle: { color: '#1e2b33' } } },
-  series: [{ type: 'line', smooth: true, showSymbol: false, data: dailyTotals.value.map((day) => day.value), itemStyle: { color: '#a8eea0' }, areaStyle: { color: 'rgba(168, 238, 160, .12)' } }],
+  grid: { left: 48, right: 12, top: 18, bottom: 40 },
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (rows) => `${rows[0].name}：${money(rows[0].data)}` },
+  xAxis: { type: 'category', data: chartData.value.map((row) => row.name), axisLabel: { color: '#8d9f96', fontSize: 11, interval: 0, rotate: chartData.value.length > 5 ? 35 : 0 }, axisLine: { lineStyle: { color: '#26323a' } }, axisTick: { show: false } },
+  yAxis: { type: 'value', axisLabel: { color: '#8d9f96', fontSize: 10, formatter: (value) => (value >= 1000 ? `${value / 1000}k` : value) }, splitLine: { lineStyle: { color: '#1e2b33' } } },
+  series: [{ type: 'bar', barMaxWidth: 34, data: chartData.value.map((row) => row.value), itemStyle: { borderRadius: [6, 6, 0, 0], color: (params) => PALETTE[params.dataIndex % PALETTE.length] } }],
 }))
-const chartOptions = computed(() => (chartMode.value === 'pie' ? pieOptions.value : lineOptions.value))
+const chartOptions = computed(() => (chartMode.value === 'pie' ? pieOptions.value : barOptions.value))
 
 watch([month, () => ledger.currentId], refresh)
 watch(() => auth.recovering, (value) => {
@@ -100,6 +118,11 @@ function money(value) { return `NT$ ${currency.format(value)}` }
 function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0, net: 0 } }
 function rowValid(row) { return !!row.merchant.trim() && typeof row.amount === 'number' && Number.isFinite(row.amount) && row.amount !== 0 }
 function setAllShared(value) { for (const row of draft.value) row.shared = value }
+function methodLabel(value) { return METHODS.find((item) => item.value === value)?.label ?? '信用卡' }
+function filterByCategory(name) {
+  categoryFilter.value = categoryFilter.value === name ? '' : name
+  tab.value = 'transactions'
+}
 function memberName(id) { return ledger.members.find((member) => member.user_id === id)?.display_name ?? '前成員' }
 function shiftMonth(offset) { month.value = dayjs(month.value).add(offset, 'month').format('YYYY-MM-DD') }
 async function refresh() {
@@ -275,10 +298,10 @@ async function logout() {
 
       <section class="balance-card" aria-label="本月支出摘要">
         <div class="balance-decor">✳</div>
-        <p>本月信用卡支出</p>
+        <p>本月總支出</p>
         <div class="balance-value">{{ money(total) }}</div>
         <div class="balance-divider"></div>
-        <div class="balance-row"><div><small>已記錄繳款</small><strong>{{ money(paid) }}</strong></div><div><small>支出減繳款</small><strong>{{ money(outstanding) }}</strong></div></div>
+        <div class="balance-row"><div><small>信用卡支出</small><strong>{{ money(cardTotal) }}</strong></div><div><small>已記錄繳款</small><strong>{{ money(paid) }}</strong></div><div><small>卡費減繳款</small><strong>{{ money(outstanding) }}</strong></div></div>
       </section>
 
       <div class="quick-actions">
@@ -287,7 +310,7 @@ async function logout() {
         <button @click="importOpen = true"><q-icon name="content_paste" size="20px" /><span>貼上帳單</span></button>
       </div>
 
-      <div class="section-head"><h2>本月明細</h2><span>{{ ledger.transactions.length }} 筆消費</span></div>
+      <div class="section-head"><h2>本月明細</h2><span>{{ visibleTransactions.length === ledger.transactions.length ? `${ledger.transactions.length} 筆消費` : `${visibleTransactions.length} / ${ledger.transactions.length} 筆` }}</span></div>
       <nav class="tabs" aria-label="明細分類">
         <button :class="{ active: tab === 'transactions' }" @click="tab = 'transactions'">消費</button>
         <button :class="{ active: tab === 'payments' }" @click="tab = 'payments'">繳款</button>
@@ -295,23 +318,49 @@ async function logout() {
         <button :class="{ active: tab === 'statements' }" @click="tab = 'statements'">電子帳單</button>
       </nav>
 
+      <div v-if="tab === 'transactions' && ledger.transactions.length" class="filters">
+        <input v-model="query" type="search" class="filter-search" placeholder="搜尋店家、分類、備註" aria-label="搜尋消費" />
+        <select v-model="sortBy" aria-label="排序方式"><option value="date">依日期</option><option value="amount">金額高到低</option><option value="category">依分類</option></select>
+        <select v-model="categoryFilter" aria-label="篩選分類"><option value="">全部分類</option><option v-for="name in usedCategories" :key="name">{{ name }}</option></select>
+      </div>
+
       <div v-if="ledger.loading" class="empty"><q-spinner-dots color="primary" size="34px" /></div>
       <template v-else-if="tab === 'transactions'">
         <div v-if="!ledger.transactions.length" class="empty"><q-icon name="receipt_long" size="36px" /><p>這個月還沒有消費紀錄</p><button @click="edit()">新增第一筆</button></div>
-        <section v-for="(rows, date) in grouped" :key="date" class="transaction-group">
-          <h3>{{ dayjs(date).format('M 月 D 日・ddd') }}</h3>
-          <div v-for="tx in rows" :key="tx.id" class="list-row">
+        <div v-else-if="!visibleTransactions.length" class="empty"><q-icon name="search_off" size="36px" /><p>找不到符合的消費</p><button @click="query = ''; categoryFilter = ''">清除搜尋與篩選</button></div>
+        <template v-else-if="sortBy === 'date'">
+          <section v-for="(rows, date) in grouped" :key="date" class="transaction-group">
+            <h3>{{ dayjs(date).format('M 月 D 日・ddd') }}</h3>
+            <div v-for="tx in rows" :key="tx.id" class="list-row">
+              <div class="category-icon">{{ tx.category?.[0] || '記' }}</div>
+              <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="tx.card_name"> · {{ tx.card_name }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付，{{ tx.split_among.length }} 人分</template></small></div>
+              <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
+            </div>
+          </section>
+        </template>
+        <template v-else>
+          <div v-for="tx in visibleTransactions" :key="tx.id" class="list-row">
             <div class="category-icon">{{ tx.category?.[0] || '記' }}</div>
-            <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ tx.category }}<template v-if="tx.card_name"> · {{ tx.card_name }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付，{{ tx.split_among.length }} 人分</template></small></div>
+            <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ dayjs(tx.spent_at).format('M/D') }} · {{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付</template></small></div>
             <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
           </div>
-        </section>
+        </template>
         <section v-if="chartData.length" class="chart-card">
           <div class="section-head">
             <h2>{{ chartMode === 'pie' ? '支出分類' : '每日支出' }}</h2>
             <div class="chart-toggle"><button :class="{ active: chartMode === 'pie' }" @click="chartMode = 'pie'">圓餅圖</button><button :class="{ active: chartMode === 'line' }" @click="chartMode = 'line'">折線圖</button></div>
           </div>
           <VChart class="chart" :option="chartOptions" autoresize />
+          <div class="breakdown">
+            <button v-for="row in breakdown" :key="row.name" class="breakdown-row" :class="{ active: categoryFilter === row.name }" @click="filterByCategory(row.name)">
+              <span class="breakdown-dot" :style="{ background: row.color }"></span>
+              <span class="breakdown-name">{{ row.name }}</span>
+              <span class="breakdown-bar"><i :style="{ width: `${row.share}%`, background: row.color }"></i></span>
+              <span class="breakdown-share">{{ row.share.toFixed(1) }}%</span>
+              <strong class="breakdown-value">{{ money(row.value) }}</strong>
+            </button>
+            <p class="breakdown-hint">點分類可在明細中只看該分類；退款不計入佔比。</p>
+          </div>
         </section>
       </template>
       <template v-else-if="tab === 'payments'">
@@ -400,7 +449,7 @@ async function logout() {
 </template>
 
 <style lang="scss" scoped>
-.app-shell { min-height: 100svh; background: #0d121a; }
+.app-shell { min-height: 100svh; background: #0d121a; color-scheme: dark; }
 .topbar { max-width: 980px; margin: auto; padding: 20px 22px 8px; display: flex; justify-content: space-between; align-items: center; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; }
 .brand-mark { color: #a8eea0; font-size: 29px; line-height: 1; }
@@ -451,6 +500,19 @@ h2 { margin: 0; font-size: 19px; }
 .row-buttons button, .row-end > button { padding: 0; background: none; border: 0; color: #84978d; cursor: pointer; font-size: 11px; }
 .chart-card { background: #151d26; border: 1px solid #1e2b33; padding: 16px; border-radius: 18px; margin-top: 18px; }
 .chart { height: 260px; }
+.breakdown { margin-top: 6px; display: grid; gap: 2px; }
+.breakdown-row { display: grid; grid-template-columns: 8px 62px 1fr 44px auto; align-items: center; gap: 8px; width: 100%; background: none; border: 0; border-radius: 8px; padding: 7px 6px; color: #dceade; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.breakdown-row.active { background: #1d2a25; }
+.breakdown-dot { width: 8px; height: 8px; border-radius: 50%; }
+.breakdown-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.breakdown-bar { height: 6px; border-radius: 3px; background: #202b33; overflow: hidden; }
+.breakdown-bar i { display: block; height: 100%; border-radius: 3px; }
+.breakdown-share { color: #8d9f96; text-align: right; font-variant-numeric: tabular-nums; }
+.breakdown-value { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.breakdown-hint { color: #7d8f87; font-size: 11px; margin: 8px 0 0; }
+.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0 10px; }
+.filters .filter-search { grid-column: 1 / -1; }
+.filters input, .filters select { min-width: 0; height: 34px; border: 1px solid #26323a; border-radius: 9px; background: #121a23; color: #e6efe7; padding: 0 10px; font: inherit; font-size: 13px; }
 .upload-card { background: #151d26; border: 1px solid #25323b; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .upload-card h3 { margin: 0; font-size: 16px; }
 .upload-card p { color: #9eada5; margin: 0; line-height: 1.6; font-size: 12px; }

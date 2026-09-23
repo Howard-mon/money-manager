@@ -4,4 +4,5 @@ import { quasar, transformAssetUrls } from '@quasar/vite-plugin'
 
 export default defineConfig({
   plugins: [vue({ template: { transformAssetUrls } }), quasar()],
+  server : { port : 5183 }
 })

@@ -7,6 +7,8 @@ dayjs.extend(customParseFormat)
 const TAISHIN_ROW = /^(\d{3})\/(\d{2})\/(\d{2})\s+\d{3}\/\d{2}\/\d{2}\s+/
 const TAISHIN_END = /\s(-?[\d,]+(?:\.\d+)?)(?:\s+[A-Z]{2})?$/
 
+export const METHODS = [{ value: 'card', label: '信用卡' }, { value: 'cash', label: '現金' }, { value: 'transfer', label: '轉帳' }]
+
 export const CATEGORIES = ['餐飲', '交通', '購物', '生活', '娛樂', '訂閱', '貓咪', '醫療', '其他']
 
 // First match wins, so narrower rules sit above broader ones (小北百貨 is 生活 before 百貨 is 購物).
