@@ -370,8 +370,8 @@ async function logout() {
         </template>
         <section v-if="chartData.length" class="chart-card">
           <div class="section-head">
-            <h2>{{ chartMode === 'pie' ? '支出分類' : '每日支出' }}</h2>
-            <div class="chart-toggle"><button :class="{ active: chartMode === 'pie' }" @click="chartMode = 'pie'">圓餅圖</button><button :class="{ active: chartMode === 'line' }" @click="chartMode = 'line'">折線圖</button></div>
+            <h2>支出分類</h2>
+            <div class="chart-toggle"><button :class="{ active: chartMode === 'pie' }" @click="chartMode = 'pie'">圓餅圖</button><button :class="{ active: chartMode === 'bar' }" @click="chartMode = 'bar'">柱狀圖</button></div>
           </div>
           <VChart class="chart" :option="chartOptions" autoresize />
           <div class="breakdown">
