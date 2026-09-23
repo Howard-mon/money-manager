@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitSummary } from '../src/utils/split.js'
+import { splitShares, splitSummary } from '../src/utils/split.js'
 
 test('兩人平分餐費，未付的一方要轉帳給付款人', () => {
   const { people, transfers } = splitSummary([{ amount: 600, paid_by: 'mom', split_among: ['me', 'mom'] }], [])
@@ -26,4 +26,26 @@ test('三人互相代墊後合併成最少轉帳，已記錄的月結會抵銷',
   assert.deepEqual(transfers, [{ from: 'c', to: 'a', amount: 130 }, { from: 'b', to: 'a', amount: 40 }])
   const settlements = transfers.map((t) => ({ from_user: t.from, to_user: t.to, amount: t.amount }))
   assert.deepEqual(splitSummary(rows, settlements).transfers, [])
+})
+
+test('單筆分攤金額與總計用同一套進位，零頭落在前面的成員', () => {
+  const tx = { amount: 100, paid_by: 'a', split_among: ['a', 'b', 'c'] }
+  assert.deepEqual(splitShares(tx), { a: 33.34, b: 33.33, c: 33.33 })
+  const { people } = splitSummary([tx], [])
+  assert.equal(people.a.share, splitShares(tx).a)
+})
+
+test('成員明細逐筆加總等於分帳頁的淨額', () => {
+  const rows = [
+    { amount: 100, paid_by: 'a', split_among: ['a', 'b', 'c'] },
+    { amount: 251, paid_by: 'b', split_among: ['a', 'b'] },
+    { amount: -30, paid_by: 'a', split_among: ['a', 'b', 'c'] },
+  ]
+  const { people } = splitSummary(rows, [])
+  for (const id of ['a', 'b', 'c']) {
+    const lines = rows.filter((tx) => tx.paid_by === id || tx.split_among.includes(id))
+      .map((tx) => (tx.paid_by === id ? Number(tx.amount) : 0) - (splitShares(tx)[id] ?? 0))
+    const sum = lines.reduce((total, value) => total + value, 0)
+    assert.equal(Math.round(sum * 100), Math.round(people[id].net * 100), `成員 ${id}`)
+  }
 })

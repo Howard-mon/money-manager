@@ -12,7 +12,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { useAuthStore } from '../stores/auth.js'
 import { nameFor, useLedgerStore } from '../stores/ledger.js'
 import { CATEGORIES, METHODS, parsePastedRows } from '../utils/import.js'
-import { splitSummary } from '../utils/split.js'
+import { splitShares, splitSummary } from '../utils/split.js'
 import TransactionDialog from '../components/TransactionDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
@@ -33,6 +33,8 @@ const chartMode = ref('pie')
 const query = ref('')
 const sortBy = ref('date')
 const categoryFilter = ref('')
+const methodFilter = ref('')
+const splitMember = ref(null)
 const displayName = ref('')
 const newPassword = ref('')
 const newLedgerName = ref('')
@@ -51,6 +53,7 @@ const visibleTransactions = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   const rows = ledger.transactions.filter((tx) => {
     if (categoryFilter.value && tx.category !== categoryFilter.value) return false
+    if (methodFilter.value && (tx.method ?? 'card') !== methodFilter.value) return false
     if (!keyword) return true
     return `${tx.merchant} ${tx.category} ${tx.card_name ?? ''} ${tx.note ?? ''}`.toLowerCase().includes(keyword)
   })
@@ -100,7 +103,7 @@ const barOptions = computed(() => ({
 }))
 const chartOptions = computed(() => (chartMode.value === 'pie' ? pieOptions.value : barOptions.value))
 
-watch([month, () => ledger.currentId], refresh)
+watch([month, () => ledger.currentId], () => { splitMember.value = null; refresh() })
 watch(() => auth.recovering, (value) => {
   if (!value) return
   openAccount()
@@ -119,6 +122,20 @@ function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0,
 function rowValid(row) { return !!row.merchant.trim() && typeof row.amount === 'number' && Number.isFinite(row.amount) && row.amount !== 0 }
 function setAllShared(value) { for (const row of draft.value) row.shared = value }
 function methodLabel(value) { return METHODS.find((item) => item.value === value)?.label ?? '信用卡' }
+// Where one member's balance comes from: what they paid, what they owe, and settled transfers.
+const memberDetail = computed(() => {
+  const id = splitMember.value
+  if (!id) return null
+  const lines = ledger.transactions
+    .filter((tx) => tx.paid_by === id || tx.split_among.includes(id))
+    .map((tx) => {
+      const paid = tx.paid_by === id ? Number(tx.amount) : 0
+      const share = splitShares(tx)[id] ?? 0
+      return { id: tx.id, spent_at: tx.spent_at, merchant: tx.merchant, category: tx.category, method: tx.method, paid, share, net: paid - share, people: tx.split_among.length }
+    })
+  const transfers = ledger.settlements.filter((item) => item.from_user === id || item.to_user === id)
+  return { lines, transfers, balance: balanceOf(id), name: memberName(id) }
+})
 function filterByCategory(name) {
   categoryFilter.value = categoryFilter.value === name ? '' : name
   tab.value = 'transactions'
@@ -322,6 +339,12 @@ async function logout() {
         <input v-model="query" type="search" class="filter-search" placeholder="搜尋店家、分類、備註" aria-label="搜尋消費" />
         <select v-model="sortBy" aria-label="排序方式"><option value="date">依日期</option><option value="amount">金額高到低</option><option value="category">依分類</option></select>
         <select v-model="categoryFilter" aria-label="篩選分類"><option value="">全部分類</option><option v-for="name in usedCategories" :key="name">{{ name }}</option></select>
+        <div class="method-chips" role="group" aria-label="篩選付款方式">
+          <button :class="{ active: methodFilter === '' }" @click="methodFilter = ''">全部</button>
+          <button v-for="item in METHODS" :key="item.value" :class="{ active: methodFilter === item.value }" @click="methodFilter = item.value">
+            <span class="method-dot" :class="item.value === 'card' ? 'card' : 'cashlike'"></span>{{ item.label }}
+          </button>
+        </div>
       </div>
 
       <div v-if="ledger.loading" class="empty"><q-spinner-dots color="primary" size="34px" /></div>
@@ -332,7 +355,7 @@ async function logout() {
           <section v-for="(rows, date) in grouped" :key="date" class="transaction-group">
             <h3>{{ dayjs(date).format('M 月 D 日・ddd') }}</h3>
             <div v-for="tx in rows" :key="tx.id" class="list-row">
-              <div class="category-icon">{{ tx.category?.[0] || '記' }}</div>
+              <div class="category-icon" :class="(tx.method ?? 'card') === 'card' ? 'card' : 'cashlike'" :title="methodLabel(tx.method)">{{ tx.category?.[0] || '記' }}</div>
               <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="tx.card_name"> · {{ tx.card_name }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付，{{ tx.split_among.length }} 人分</template></small></div>
               <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
             </div>
@@ -340,7 +363,7 @@ async function logout() {
         </template>
         <template v-else>
           <div v-for="tx in visibleTransactions" :key="tx.id" class="list-row">
-            <div class="category-icon">{{ tx.category?.[0] || '記' }}</div>
+            <div class="category-icon" :class="(tx.method ?? 'card') === 'card' ? 'card' : 'cashlike'" :title="methodLabel(tx.method)">{{ tx.category?.[0] || '記' }}</div>
             <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ dayjs(tx.spent_at).format('M/D') }} · {{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付</template></small></div>
             <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
           </div>
@@ -369,12 +392,31 @@ async function logout() {
       </template>
       <template v-else-if="tab === 'split'">
         <div v-if="!shared" class="empty"><q-icon name="group_add" size="36px" /><p>這本帳本目前只有你</p><button @click="ledgerOpen = true">建立家庭帳本並邀請家人</button></div>
+        <template v-else-if="memberDetail">
+          <nav class="crumbs" aria-label="麵包屑"><button @click="splitMember = null">分帳</button><span aria-hidden="true">›</span><strong>{{ memberDetail.name }}</strong></nav>
+          <div class="detail-summary">
+            <div><small>已付</small><strong>{{ money(memberDetail.balance.paid) }}</strong></div>
+            <div><small>應分攤</small><strong>{{ money(memberDetail.balance.share) }}</strong></div>
+            <div><small>{{ memberDetail.balance.net > 0 ? '應收' : memberDetail.balance.net < 0 ? '應付' : '已平衡' }}</small><strong :class="{ owed: memberDetail.balance.net > 0, owes: memberDetail.balance.net < 0 }">{{ money(Math.abs(memberDetail.balance.net)) }}</strong></div>
+          </div>
+          <div v-for="line in memberDetail.lines" :key="line.id" class="list-row">
+            <div class="category-icon" :class="(line.method ?? 'card') === 'card' ? 'card' : 'cashlike'">{{ line.category?.[0] || '記' }}</div>
+            <div class="row-copy"><strong>{{ line.merchant }}</strong><small>{{ dayjs(line.spent_at).format('M/D') }} · {{ line.paid ? `他付 ${currency.format(line.paid)}` : '別人付' }} · {{ line.people }} 人分攤 {{ currency.format(line.share) }}</small></div>
+            <div class="row-end"><strong :class="{ owed: line.net > 0, owes: line.net < 0 }">{{ line.net > 0 ? '+' : '' }}{{ money(line.net) }}</strong></div>
+          </div>
+          <template v-if="memberDetail.transfers.length">
+            <div class="section-head split-head"><h2>已記錄的轉帳</h2></div>
+            <div v-for="item in memberDetail.transfers" :key="item.id" class="list-row"><div class="category-icon">✓</div><div class="row-copy"><strong>{{ memberName(item.from_user) }} → {{ memberName(item.to_user) }}</strong><small>{{ dayjs(item.created_at).format('YYYY/MM/DD') }} 記錄</small></div><div class="row-end"><strong :class="{ owed: item.from_user === splitMember, owes: item.to_user === splitMember }">{{ item.from_user === splitMember ? '+' : '-' }}{{ money(item.amount) }}</strong></div></div>
+          </template>
+          <p class="breakdown-hint">「已付」是他先墊的錢，「應分攤」是他該負擔的部分，兩者相減就是應收或應付。</p>
+        </template>
         <template v-else>
-          <div v-for="member in ledger.members" :key="member.user_id" class="list-row">
+          <button v-for="member in ledger.members" :key="member.user_id" class="list-row member-row" @click="splitMember = member.user_id">
             <div class="category-icon">{{ member.display_name[0] }}</div>
             <div class="row-copy"><strong>{{ member.display_name }}</strong><small>已付 {{ money(balanceOf(member.user_id).paid) }} · 應分攤 {{ money(balanceOf(member.user_id).share) }}</small></div>
             <div class="row-end"><strong :class="{ owed: balanceOf(member.user_id).net > 0, owes: balanceOf(member.user_id).net < 0 }">{{ balanceOf(member.user_id).net > 0 ? '應收' : balanceOf(member.user_id).net < 0 ? '應付' : '已平衡' }} {{ money(Math.abs(balanceOf(member.user_id).net)) }}</strong></div>
-          </div>
+            <q-icon name="chevron_right" size="18px" class="member-chevron" />
+          </button>
           <div class="section-head split-head"><h2>誰給誰</h2></div>
           <div v-if="!summary.transfers.length" class="settled"><q-icon name="task_alt" size="20px" /> 本月已結清，沒有待轉帳的款項</div>
           <div v-for="(transfer, index) in summary.transfers" :key="index" class="list-row"><div class="category-icon">→</div><div class="row-copy"><strong>{{ memberName(transfer.from) }} → {{ memberName(transfer.to) }}</strong><small>待轉帳</small></div><strong>{{ money(transfer.amount) }}</strong></div>
@@ -488,6 +530,21 @@ h2 { margin: 0; font-size: 19px; }
 .transaction-group h3 { color: #8d9f96; font-size: 12px; font-weight: 500; margin: 14px 0 5px; }
 .list-row { display: flex; align-items: center; gap: 10px; background: #151d26; border: 1px solid #1e2b33; border-radius: 11px; padding: 8px 11px; margin: 4px 0; min-width: 0; }
 .category-icon { flex: 0 0 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: #293831; color: #b7e7b0; font-size: 12px; font-weight: 700; }
+.category-icon.cashlike { background: #38301f; color: #ecc98b; }
+.method-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.method-chips button { display: flex; align-items: center; gap: 5px; border: 1px solid #26323a; background: #121a23; color: #9aaba4; border-radius: 999px; padding: 5px 11px; font: inherit; font-size: 12px; cursor: pointer; }
+.method-chips button.active { background: #1d2a25; border-color: #3c5748; color: #dceade; font-weight: 700; }
+.method-dot { width: 8px; height: 8px; border-radius: 50%; }
+.method-dot.card { background: #b7e7b0; }
+.method-dot.cashlike { background: #ecc98b; }
+.member-row { width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.member-chevron { color: #6d7f77; flex: 0 0 auto; }
+.crumbs { display: flex; align-items: center; gap: 7px; margin: 2px 0 12px; font-size: 13px; color: #8d9f96; }
+.crumbs button { background: none; border: 0; color: #a8eea0; font: inherit; padding: 0; cursor: pointer; }
+.detail-summary { display: flex; gap: 10px; background: #151d26; border: 1px solid #1e2b33; border-radius: 13px; padding: 12px 14px; margin-bottom: 10px; }
+.detail-summary div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.detail-summary small { color: #84978d; font-size: 11px; }
+.detail-summary strong { font-size: 14px; }
 .row-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .row-copy strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; }
 .row-copy small { color: #84978d; font-size: 11px; }

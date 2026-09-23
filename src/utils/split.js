@@ -1,3 +1,13 @@
+// What each member owes for one transaction. Works in cents, so the shares always
+// add back up to the original amount; the first members absorb any leftover cent.
+export function splitShares(tx) {
+  const total = Math.round(Number(tx.amount) * 100)
+  const count = tx.split_among.length
+  const base = Math.floor(total / count)
+  const extra = total - base * count
+  return Object.fromEntries(tx.split_among.map((id, index) => [id, (base + (index < extra ? 1 : 0)) / 100]))
+}
+
 // Works in cents so every split adds back up to the original amount.
 // net > 0: the member should receive money; net < 0: the member should pay.
 export function splitSummary(transactions, settlements) {
@@ -6,12 +16,9 @@ export function splitSummary(transactions, settlements) {
   const cents = (value) => Math.round(Number(value) * 100)
 
   for (const tx of transactions) {
-    const total = cents(tx.amount)
-    const count = tx.split_among.length
-    const base = Math.floor(total / count)
-    person(tx.paid_by).paid += total
-    // The first (total - base * count) members absorb the leftover cents.
-    tx.split_among.forEach((id, index) => { person(id).share += base + (index < total - base * count ? 1 : 0) })
+    person(tx.paid_by).paid += cents(tx.amount)
+    const shares = splitShares(tx)
+    for (const id in shares) person(id).share += cents(shares[id])
   }
   for (const id in people) people[id].net = people[id].paid - people[id].share
   for (const transfer of settlements) {
