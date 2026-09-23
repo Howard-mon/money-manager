@@ -53,7 +53,7 @@ async function submit() {
 
 <template>
   <main class="login-page">
-    <div class="brand"><span class="brand-mark">◒</span> 搭夥帳</div>
+    <div class="brand"><img class="brand-mark" src="/logo.svg" alt="" width="34" height="34" /> 搭夥帳</div>
     <section class="login-card">
       <div class="eyebrow">YOUR PRIVATE LEDGER</div>
       <h1>每一筆日常，<br /><em>都能看得清楚。</em></h1>
@@ -86,7 +86,7 @@ async function submit() {
 <style lang="scss" scoped>
 .login-page { min-height: 100svh; max-width: 520px; margin: auto; padding: 28px 22px; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 10px; color: #eef5ed; font-size: 18px; font-weight: 700; letter-spacing: .03em; }
-.brand-mark { color: #a8eea0; font-size: 30px; line-height: 1; }
+.brand-mark { width: 34px; height: 34px; display: block; }
 .login-card { margin: auto 0; padding: 36px 0; }
 .eyebrow { color: #a8eea0; font-size: 11px; font-weight: 700; letter-spacing: .22em; }
 h1 { margin: 18px 0 12px; font-size: clamp(34px, 10vw, 48px); line-height: 1.25; letter-spacing: -.04em; }
