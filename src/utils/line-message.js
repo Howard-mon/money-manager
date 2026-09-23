@@ -12,6 +12,8 @@ const METHOD_WORDS = {
 }
 const METHOD_LABELS = { card: '信用卡', cash: '現金', transfer: '轉帳' }
 const RELATIVE_DAYS = { 今天: 0, 今日: 0, 昨天: -1, 昨日: -1, 前天: -2 }
+// Card spending usually lands on the next statement; cash stays in the month it was spent.
+const BILLING_SHIFT = { 下期: 1, 下期帳單: 1, 次期: 1, 本期: 0, 本期帳單: 0, 這期: 0 }
 
 export const HELP_TEXT = [
   '記帳格式：記帳 [日期] 項目 金額 [付款方式] [分攤]',
@@ -26,6 +28,7 @@ export const HELP_TEXT = [
   '日期：今天、昨天、9/20、2026/9/20，不寫就是今天',
   '付款方式：信用卡、現金、轉帳，不寫就是信用卡',
   '分攤：分帳（群組預設成員）、全部平分、某某 某某平分，不寫就只算付款人',
+  '帳單：加「下期」會記到下一期帳單，適合今天刷的信用卡',
   '分類：分類:餐飲 或 #餐飲，不寫會自動判斷',
   '',
   '其他指令：撤銷、目前帳本、記帳說明',
@@ -85,6 +88,7 @@ export function parseExpense(text, context) {
   let payerName = null
   let splitMode = null
   let splitNames = null
+  let billingShift = 0
 
   for (const [index, token] of tokens.entries()) {
     if (!spentAt) {
@@ -101,6 +105,7 @@ export function parseExpense(text, context) {
     if (tagged) { category = tagged[tagged.length - 1]; continue }
     const card = token.match(/^(卡片|卡別|信用卡)[:：](.+)$/)
     if (card) { cardName = card[2]; continue }
+    if (token in BILLING_SHIFT) { billingShift = BILLING_SHIFT[token]; continue }
     if (token === '分帳' || token === '平分') { splitMode = 'default'; continue }
     if (token === '全部平分' || token === '全部分帳' || token === '大家平分') { splitMode = 'all'; continue }
     const named = token.match(/^(.+?)平分$/)
@@ -146,7 +151,7 @@ export function parseExpense(text, context) {
   return {
     record: {
       spent_at: date.format('YYYY-MM-DD'),
-      billing_month: date.startOf('month').format('YYYY-MM-DD'),
+      billing_month: date.startOf('month').add(billingShift, 'month').format('YYYY-MM-DD'),
       merchant,
       amount,
       category: category ?? guessCategory(merchant),
@@ -166,7 +171,7 @@ export function formatReceipt({ ledgerName, record, members }) {
     `已記到「${ledgerName}」`,
     `${record.merchant}　NT$ ${record.amount.toLocaleString('zh-TW')}`,
     `${dayjs(record.spent_at).format('M/D')}・${record.category}${record.card_name ? `・${record.card_name}` : ''}`,
-    `${nameOf(record.paid_by)}付・${METHOD_LABELS[record.method]}`,
+    `${nameOf(record.paid_by)}付・${METHOD_LABELS[record.method]}・計入 ${dayjs(record.billing_month).format('M 月')}帳單`,
   ]
   if (record.split_among.length > 1) {
     lines.push(`分攤：${record.split_among.map((id) => `${nameOf(id)} ${shares[id].toLocaleString('zh-TW')}`).join('、')}`)

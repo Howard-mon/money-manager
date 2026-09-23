@@ -229,3 +229,9 @@ test('Webhook 進入點：空事件回 200，簽章錯誤回 401，非 POST 回 
   assert.equal((await post('{"events":[]} tampered', signature)).status, 401)
   assert.equal((await webhook(new Request('https://example.test/api/line/webhook'))).status, 405)
 })
+
+test('「下期」會把消費記到下一期帳單，跨年也正確', () => {
+  assert.equal(parse(' 今天 好市多 3200 下期').record.billing_month, '2026-11-01')
+  assert.equal(parse(' 今天 好市多 3200').record.billing_month, '2026-10-01')
+  assert.equal(parse(' 12/30 尾牙 2000 下期', { today: new Date('2026-12-30T12:00:00+08:00') }).record.billing_month, '2027-01-01')
+})

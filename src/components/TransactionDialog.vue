@@ -13,6 +13,8 @@ const amount = ref('')
 const category = ref('餐飲')
 const cardName = ref('')
 const method = ref('card')
+// Which statement this lands on, relative to the month being viewed: today's card spending is billed next month.
+const billingShift = ref(0)
 const note = ref('')
 const paidBy = ref(null)
 const splitAmong = ref([])
@@ -29,6 +31,7 @@ watch(() => props.modelValue, (value) => {
   category.value = tx?.category ?? '餐飲'
   cardName.value = tx?.card_name ?? ''
   method.value = tx?.method ?? 'card'
+  billingShift.value = tx ? dayjs(tx.billing_month).diff(dayjs(props.month).startOf('month'), 'month') : 0
   note.value = tx?.note ?? ''
   paidBy.value = tx?.paid_by ?? props.me
   splitAmong.value = tx?.split_among ?? props.members.map((member) => member.user_id)
@@ -39,7 +42,7 @@ function submit() {
   emit('save', {
     ...(props.transaction?.id ? { id: props.transaction.id } : {}),
     spent_at: dayjs(spentAt.value).format('YYYY-MM-DD'),
-    billing_month: dayjs(props.month).startOf('month').format('YYYY-MM-DD'),
+    billing_month: dayjs(props.month).startOf('month').add(billingShift.value, 'month').format('YYYY-MM-DD'),
     merchant: merchant.value.trim(),
     amount: Math.round(Number(amount.value)),
     category: category.value,
@@ -79,7 +82,13 @@ function submit() {
         </div>
         <label>備註</label>
         <q-input v-model="note" outlined dense maxlength="300" placeholder="選填" />
-        <p class="hint">這筆消費會計入 {{ dayjs(month).format('YYYY 年 M 月') }}帳單。</p>
+        <label>計入哪一期帳單</label>
+        <div class="billing-chips" role="group" aria-label="計入哪一期帳單">
+          <button v-for="shift in [-1, 0, 1]" :key="shift" type="button" :class="{ active: billingShift === shift }" @click="billingShift = shift">
+            {{ dayjs(month).add(shift, 'month').format('M 月') }}<template v-if="shift === 0">（本頁）</template>
+          </button>
+        </div>
+        <p class="hint">今天刷的卡通常出現在下一期帳單，現金則記在消費當月。</p>
         <q-btn class="save" type="submit" unelevated no-caps :loading="busy" label="儲存消費" />
       </form>
     </q-card>
@@ -93,6 +102,9 @@ h2 { font-size: 20px; margin: 0; }
 label { display: block; color: #aebdb8; font-size: 12px; margin: 16px 0 8px; }
 .row-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .error { color: #ffaaa0; font-size: 12px; margin: 6px 0 0; }
+.billing-chips { display: flex; gap: 6px; }
+.billing-chips button { flex: 1; border: 1px solid #3d4d4e; background: #0e151d; color: #cfe0d4; border-radius: 10px; padding: 8px 4px; font: inherit; font-size: 13px; cursor: pointer; }
+.billing-chips button.active { background: #263832; border-color: #3c5748; color: #c1f2ad; font-weight: 700; }
 .hint { color: #89a197; font-size: 12px; margin: 18px 0 0; }
 .save { width: 100%; background: #a8eea0; color: #17271b; font-weight: 700; height: 48px; border-radius: 12px; margin-top: 20px; }
 </style>

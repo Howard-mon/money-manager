@@ -78,6 +78,12 @@ watch(parsed, (result) => {
 })
 const parsedCards = computed(() => [...new Set(draft.value.map((row) => row.source_card).filter(Boolean))])
 const draftTotal = computed(() => sumBy(draft.value, (row) => Number(row.amount) || 0))
+const draftSpan = computed(() => {
+  const dates = draft.value.map((row) => row.spent_at).sort()
+  if (!dates.length) return ''
+  const format = (value) => dayjs(value).format('M/D')
+  return dates[0] === dates.at(-1) ? format(dates[0]) : `${format(dates[0])}–${format(dates.at(-1))}`
+})
 const draftValid = computed(() => draft.value.length > 0 && !parsed.value.errors.length && draft.value.every(rowValid))
 const shared = computed(() => ledger.members.length > 1)
 const summary = computed(() => splitSummary(ledger.transactions, ledger.settlements))
@@ -169,7 +175,11 @@ async function saveTransaction(record) {
     await ledger.saveTransaction(record, auth.user.id)
     transactionOpen.value = false
     await refresh()
-    $q.notify({ type: 'positive', message: '消費已儲存' })
+    const elsewhere = record.billing_month !== dayjs(month.value).startOf('month').format('YYYY-MM-DD')
+    $q.notify({
+      type: 'positive',
+      message: elsewhere ? `已記入 ${dayjs(record.billing_month).format('M 月')}帳單，切換月份才看得到` : '消費已儲存',
+    })
   } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
   finally { busy.value = false }
 }
@@ -476,6 +486,7 @@ async function logout() {
         <div v-else-if="draft.length" class="preview">
           <div class="preview-head">
             <strong>預覽：{{ draft.length }} 筆，合計 {{ money(draftTotal) }}</strong>
+            <span class="preview-span">消費日 {{ draftSpan }} → 計入 {{ dayjs(month).format('YYYY 年 M 月') }}帳單</span>
             <div v-if="shared" class="bulk-actions"><button type="button" @click="setAllShared(true)">全部分帳</button><button type="button" @click="setAllShared(false)">全部個人</button></div>
           </div>
           <label class="batch-card">
@@ -634,6 +645,7 @@ h2 { margin: 0; font-size: 19px; }
 .paste-formats { color: #a8b9ae; font-size: 12px; line-height: 1.7; margin: -4px 0 12px; padding-left: 18px; }
 .import-sheet { color-scheme: dark; }
 .preview-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.preview-span { color: #a2ada1; font-size: 11px; width: 100%; }
 .bulk-actions { display: flex; gap: 6px; }
 .bulk-actions button { border: 1px solid #3d4d4e; background: transparent; color: #cfe0d4; border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .batch-card { display: grid; gap: 5px; margin: 4px 0 2px; }
