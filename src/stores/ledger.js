@@ -16,6 +16,8 @@ export const useLedgerStore = defineStore('ledger', () => {
   const settlements = ref([])
   const statements = ref([])
   const loading = ref(false)
+  const lineUser = ref(null)
+  const lineGroups = ref([])
   const current = computed(() => ledgers.value.find((item) => item.id === currentId.value) ?? null)
   const members = computed(() => current.value?.ledger_members ?? [])
   let latestLoad = 0
@@ -28,7 +30,7 @@ export const useLedgerStore = defineStore('ledger', () => {
 
   async function fetchLedgers() {
     const { data, error } = await supabase.from('ledgers')
-      .select('id, name, invite_code, ledger_members(user_id, display_name)')
+      .select('id, name, owner_id, invite_code, ledger_members(user_id, display_name)')
       .order('created_at')
       .order('joined_at', { referencedTable: 'ledger_members' })
     if (error) throw error
@@ -66,6 +68,23 @@ export const useLedgerStore = defineStore('ledger', () => {
     const { error } = await supabase.from('ledger_members').update({ display_name: name }).eq('user_id', user.id)
     if (error) throw error
     await loadLedgers(user)
+  }
+
+  // Link state only: the browser can read its own line_users row and the group links of its ledgers.
+  async function loadLineStatus() {
+    const [{ data: me, error: meError }, { data: groups, error: groupError }] = await Promise.all([
+      supabase.from('line_users').select('linked_at, default_ledger_id').maybeSingle(),
+      supabase.from('line_groups').select('ledger_id, default_split_among, linked_at'),
+    ])
+    if (meError) throw meError
+    if (groupError) throw groupError
+    lineUser.value = me
+    lineGroups.value = groups ?? []
+  }
+
+  async function createLineCode(kind, ledgerId, memberIds = []) {
+    const rows = await rpc('create_line_link_code', { link_kind: kind, target_ledger: ledgerId ?? null, members: memberIds })
+    return Array.isArray(rows) ? rows[0] : rows
   }
 
   async function load(month, userId) {
@@ -155,8 +174,8 @@ export const useLedgerStore = defineStore('ledger', () => {
   }
 
   return {
-    ledgers, currentId, current, members, transactions, payments, settlements, statements, loading,
-    loadLedgers, selectLedger, createLedger, joinLedger, renameMember, load,
+    ledgers, currentId, current, members, transactions, payments, settlements, statements, loading, lineUser, lineGroups,
+    loadLedgers, selectLedger, createLedger, joinLedger, renameMember, load, loadLineStatus, createLineCode,
     saveTransaction, importTransactions, deleteTransaction, savePayment, deletePayment,
     saveSettlements, deleteSettlement, uploadStatement, statementUrl,
   }

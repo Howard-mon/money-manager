@@ -38,6 +38,8 @@ const splitMember = ref(null)
 const displayName = ref('')
 const newPassword = ref('')
 const newLedgerName = ref('')
+const lineCode = ref(null)
+const groupSplit = ref([])
 const editing = ref(null)
 const busy = ref(false)
 const paste = ref('')
@@ -80,6 +82,8 @@ const draftValid = computed(() => draft.value.length > 0 && !parsed.value.errors
 const shared = computed(() => ledger.members.length > 1)
 const summary = computed(() => splitSummary(ledger.transactions, ledger.settlements))
 const inviteLink = computed(() => `${location.origin}/join/${ledger.current?.invite_code ?? ''}`)
+const isOwner = computed(() => ledger.current?.owner_id === auth.user?.id)
+const lineGroupLink = computed(() => ledger.lineGroups.find((group) => group.ledger_id === ledger.currentId) ?? null)
 // Spending only: refunds would make a share of the total meaningless.
 const chartData = computed(() => {
   const byCategory = groupBy(ledger.transactions.filter((tx) => Number(tx.amount) > 0), 'category')
@@ -240,6 +244,22 @@ function askToJoin(code) {
     }).onCancel(resolve)
   })
 }
+async function openLedgerSettings() {
+  lineCode.value = null
+  groupSplit.value = ledger.members.map((member) => member.user_id)
+  ledgerOpen.value = true
+  try {
+    await ledger.loadLineStatus()
+  } catch (error) { $q.notify({ type: 'negative', message: `讀取 LINE 連結狀態失敗：${error.message}` }) }
+}
+async function makeLineCode(kind) {
+  busy.value = true
+  try {
+    const created = await ledger.createLineCode(kind, kind === 'group' ? ledger.currentId : ledger.currentId, kind === 'group' ? groupSplit.value : [])
+    lineCode.value = { kind, code: created.code, expiresAt: created.expires_at }
+  } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  finally { busy.value = false }
+}
 async function createLedger() {
   if (!newLedgerName.value.trim()) return
   busy.value = true
@@ -311,7 +331,7 @@ async function logout() {
         <span class="brand-mark">◒</span>
         <q-select :model-value="ledger.currentId" :options="ledger.ledgers" option-value="id" option-label="name" emit-value map-options dense borderless aria-label="切換帳本" class="ledger-select" @update:model-value="ledger.selectLedger" />
       </div>
-      <div><q-btn flat round icon="group_add" aria-label="帳本成員與邀請" @click="ledgerOpen = true" /><q-btn flat round icon="logout" aria-label="登出" @click="logout" /></div>
+      <div><q-btn flat round icon="group_add" aria-label="帳本成員與邀請" @click="openLedgerSettings" /><q-btn flat round icon="logout" aria-label="登出" @click="logout" /></div>
     </header>
 
     <main class="content">
@@ -401,7 +421,7 @@ async function logout() {
         <div v-for="payment in ledger.payments" :key="payment.id" class="list-row payment-row"><div class="category-icon">✓</div><div class="row-copy"><strong>信用卡繳款</strong><small>{{ dayjs(payment.paid_at).format('YYYY/MM/DD') }}</small></div><div class="row-end"><strong>{{ money(payment.amount) }}</strong><button :aria-label="`刪除 ${payment.paid_at} 繳款`" @click="confirmDelete('payment', payment.id)">刪除</button></div></div>
       </template>
       <template v-else-if="tab === 'split'">
-        <div v-if="!shared" class="empty"><q-icon name="group_add" size="36px" /><p>這本帳本目前只有你</p><button @click="ledgerOpen = true">建立家庭帳本並邀請家人</button></div>
+        <div v-if="!shared" class="empty"><q-icon name="group_add" size="36px" /><p>這本帳本目前只有你</p><button @click="openLedgerSettings">建立家庭帳本並邀請家人</button></div>
         <template v-else-if="memberDetail">
           <nav class="crumbs" aria-label="麵包屑"><button @click="splitMember = null">分帳</button><span aria-hidden="true">›</span><strong>{{ memberDetail.name }}</strong></nav>
           <div class="detail-summary">
@@ -496,6 +516,26 @@ async function logout() {
         <h3 class="sheet-title">邀請家人加入這本帳本</h3>
         <p>把連結傳給家人。對方登入或註冊後，就能一起記帳和分帳。拿到連結的人都能加入，請只傳給你信任的人。</p>
         <div class="field-row"><input :value="inviteLink" readonly aria-label="邀請連結" @focus="$event.target.select()" /><q-btn unelevated no-caps class="small-button" label="分享" @click="shareInvite" /></div>
+        <h3 class="sheet-title">連結 LINE 記帳機器人</h3>
+        <p>
+          綁定後可以直接在 LINE 傳「記帳 午餐 120」記到帳本。
+          個人綁定：{{ ledger.lineUser ? `已連結（${dayjs(ledger.lineUser.linked_at).format('YYYY/MM/DD')}）` : '尚未連結' }}；
+          這本帳本的群組：{{ lineGroupLink ? `已綁定（${dayjs(lineGroupLink.linked_at).format('YYYY/MM/DD')}）` : '尚未綁定' }}。
+        </p>
+        <div class="line-actions">
+          <q-btn unelevated no-caps class="small-button" :loading="busy" label="產生個人綁定碼" @click="makeLineCode('user')" />
+          <q-btn v-if="isOwner" outline no-caps class="small-button outline-button" :loading="busy" label="產生群組綁定碼" @click="makeLineCode('group')" />
+        </div>
+        <template v-if="isOwner && ledger.members.length > 1">
+          <p class="line-hint">群組裡說「分帳」時，預設分給：</p>
+          <q-option-group v-model="groupSplit" type="checkbox" inline dense :options="ledger.members.map((member) => ({ label: member.display_name, value: member.user_id }))" />
+        </template>
+        <div v-if="lineCode" class="line-code">
+          <strong>{{ lineCode.code }}</strong>
+          <p v-if="lineCode.kind === 'user'">在和機器人的一對一聊天室傳送這組碼即可完成個人綁定。</p>
+          <p v-else>把機器人加進 LINE 群組後，在群組裡傳「綁定 {{ lineCode.code }}」，帳本就會綁到那個群組。</p>
+          <small>{{ dayjs(lineCode.expiresAt).format('HH:mm') }} 前有效，只能使用一次。</small>
+        </div>
         <h3 class="sheet-title">建立新帳本</h3>
         <p>例如另建一本「家庭帳本」，個人消費留在「我的帳本」，家人看不到。</p>
         <form class="field-row" @submit.prevent="createLedger"><q-input v-model="newLedgerName" outlined dense maxlength="40" placeholder="帳本名稱" class="grow" /><q-btn type="submit" unelevated no-caps class="small-button" :loading="busy" :disable="!newLedgerName.trim()" label="建立" /></form>
@@ -632,6 +672,13 @@ textarea { width: 100%; border: 1px solid #3d4d4e; border-radius: 11px; padding:
 .field-row { display: flex; gap: 8px; align-items: flex-start; }
 .field-row input { flex: 1; min-width: 0; height: 40px; border: 1px solid #3d4d4e; border-radius: 10px; padding: 0 12px; background: #0e151d; color: #f0f4ed; font-size: 12px; }
 .field-row .grow { flex: 1; }
+.line-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.outline-button { background: transparent; color: #a8eea0; border: 1px solid #3c5748; font-weight: 600; }
+.line-hint { color: #a8b9ae; font-size: 12px; margin: 12px 0 2px; }
+.line-code { margin-top: 12px; padding: 14px; border: 1px dashed #3c5748; border-radius: 12px; }
+.line-code strong { display: block; font-size: 26px; letter-spacing: .18em; color: #a8eea0; }
+.line-code p { margin: 8px 0 4px; }
+.line-code small { color: #8ca093; font-size: 11px; }
 .small-button { background: #a8eea0; color: #17271b; height: 40px; border-radius: 10px; font-weight: 700; }
 @media (min-width: 700px) { .quick-actions { max-width: 540px; } .balance-card { max-width: 600px; } }
 @media (max-width: 390px) { .month-panel div { gap: 5px; } .balance-row { gap: 16px; } .balance-row strong { font-size: 13px; } }
