@@ -85,7 +85,8 @@ export const useLedgerStore = defineStore('ledger', () => {
         transactions.value = tx.data ?? []
         payments.value = paid.data ?? []
         settlements.value = settled.data ?? []
-        statements.value = files.data ?? []
+        // Storage keeps a 0-byte .emptyFolderPlaceholder when the last file in a folder is deleted.
+        statements.value = (files.data ?? []).filter((file) => file.id && !file.name.startsWith('.'))
       }
     } finally {
       if (loadId === latestLoad) loading.value = false
