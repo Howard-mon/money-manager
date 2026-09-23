@@ -18,7 +18,7 @@ const paidBy = ref(null)
 const splitAmong = ref([])
 const memberOptions = computed(() => props.members.map((member) => ({ label: member.display_name, value: member.user_id })))
 const shared = computed(() => props.members.length > 1)
-const perPerson = computed(() => Math.round((Number(amount.value) / splitAmong.value.length) * 100) / 100)
+const perPerson = computed(() => Math.round(Number(amount.value) / splitAmong.value.length))
 
 watch(() => props.modelValue, (value) => {
   if (!value) return
@@ -41,7 +41,7 @@ function submit() {
     spent_at: dayjs(spentAt.value).format('YYYY-MM-DD'),
     billing_month: dayjs(props.month).startOf('month').format('YYYY-MM-DD'),
     merchant: merchant.value.trim(),
-    amount: Number(amount.value),
+    amount: Math.round(Number(amount.value)),
     category: category.value,
     method: method.value,
     card_name: method.value === 'card' ? cardName.value.trim() || null : null,
@@ -63,7 +63,7 @@ function submit() {
         <label>店家／項目</label>
         <q-input v-model="merchant" outlined dense maxlength="120" placeholder="例如：午餐" :rules="[(v) => !!v?.trim() || '請輸入店家或項目']" />
         <label>金額（TWD，退款可輸入負數）</label>
-        <q-input v-model="amount" outlined dense type="number" step="0.01" placeholder="0" :rules="[(v) => Number(v) !== 0 || '請輸入非零金額']" />
+        <q-input v-model="amount" outlined dense type="number" step="1" inputmode="numeric" placeholder="0" :rules="[(v) => Math.round(Number(v)) !== 0 || '請輸入非零金額']" />
         <template v-if="shared">
           <label>誰付的</label>
           <q-select v-model="paidBy" outlined dense emit-value map-options :options="memberOptions" />

@@ -48,7 +48,7 @@ export function parsePastedRows(text, billingMonth) {
     const spentAt = dayjs(rawDate, ['YYYY/MM/DD', 'YYYY-MM-DD'], true)
     const merchant = cellsInRow[merchantIndex]?.trim()
     const rawAmount = cellsInRow[amountIndex]?.replace(/[,$NT\s]/g, '')
-    const amount = Number(rawAmount)
+    const amount = Math.round(Number(rawAmount))
     if (!spentAt.isValid() || !merchant || !rawAmount || !Number.isFinite(amount) || amount === 0) {
       errors.push(`第 ${index + (hasHeader ? 2 : 1)} 列：日期、店家或金額無效`)
       return
@@ -94,7 +94,7 @@ export function parseTaishinStatement(text, billingMonth) {
     pending = null
     const [head, year, month, day] = record.match(TAISHIN_ROW)
     const merchant = record.slice(head.length, end.index).trim().slice(0, 120)
-    const amount = Number(end[1].replaceAll(',', ''))
+    const amount = Math.round(Number(end[1].replaceAll(',', '')))
     const spentAt = dayjs(`${Number(year) + 1911}-${month}-${day}`, 'YYYY-MM-DD', true)
     // Paying last month's bill is not spending; record it under 記錄繳款 instead.
     if (!merchant || !amount || !spentAt.isValid() || merchant.includes('卡款')) {

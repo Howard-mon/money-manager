@@ -104,8 +104,8 @@ export const useLedgerStore = defineStore('ledger', () => {
   // Imported rows are paid by the importer; `shared` rows split evenly among everyone, the rest count only for the importer.
   async function importTransactions(rows, userId) {
     const everyone = members.value.map((member) => member.user_id)
-    const { error } = await supabase.from('transactions').insert(rows.map(({ shared, ...row }) => ({
-      ...row, merchant: row.merchant.trim(), ledger_id: currentId.value, user_id: userId, paid_by: userId, split_among: shared ? everyone : [userId],
+    const { error } = await supabase.from('transactions').insert(rows.map(({ shared, source_card, ...row }) => ({
+      ...row, merchant: row.merchant.trim(), amount: Math.round(Number(row.amount)), ledger_id: currentId.value, user_id: userId, paid_by: userId, split_among: shared ? everyone : [userId],
     })))
     if (error) throw error
   }

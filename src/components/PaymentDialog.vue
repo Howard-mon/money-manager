@@ -12,7 +12,7 @@ watch(() => props.modelValue, (value) => { if (value) { paidAt.value = new Date(
 
 function submit() {
   if (!paidAt.value || !Number.isFinite(Number(amount.value)) || Number(amount.value) <= 0) return
-  emit('save', { paid_at: dayjs(paidAt.value).format('YYYY-MM-DD'), billing_month: dayjs(props.month).startOf('month').format('YYYY-MM-DD'), amount: Number(amount.value) })
+  emit('save', { paid_at: dayjs(paidAt.value).format('YYYY-MM-DD'), billing_month: dayjs(props.month).startOf('month').format('YYYY-MM-DD'), amount: Math.round(Number(amount.value)) })
 }
 </script>
 
@@ -25,7 +25,7 @@ function submit() {
         <label>繳款日期</label>
         <VueDatePicker v-model="paidAt" dark :enable-time-picker="false" format="yyyy/MM/dd" auto-apply />
         <label>繳款金額（TWD）</label>
-        <q-input v-model="amount" outlined dense type="number" min="0.01" step="0.01" placeholder="0" :rules="[(v) => Number(v) > 0 || '請輸入大於 0 的金額']" />
+        <q-input v-model="amount" outlined dense type="number" min="1" step="1" inputmode="numeric" placeholder="0" :rules="[(v) => Math.round(Number(v)) > 0 || '請輸入大於 0 的金額']" />
         <q-btn class="save" type="submit" unelevated no-caps :loading="busy" label="儲存繳款" />
       </form>
     </q-card>

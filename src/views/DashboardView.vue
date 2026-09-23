@@ -42,7 +42,7 @@ const editing = ref(null)
 const busy = ref(false)
 const paste = ref('')
 const uploadedFile = ref(null)
-const currency = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
+const currency = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
 
 const PALETTE = ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92', '#c4d192', '#d9a6c8', '#889796']
 const total = computed(() => sumBy(ledger.transactions, (tx) => Number(tx.amount)))
@@ -68,7 +68,13 @@ const usedCategories = computed(() => [...new Set(ledger.transactions.map((tx) =
 const parsed = computed(() => parsePastedRows(paste.value, month.value))
 // Editable copy of the parsed rows; re-pasting or switching month starts over from the parser.
 const draft = ref([])
-watch(parsed, (result) => { draft.value = result.rows.map((row) => ({ ...row, shared: true })) })
+const batchCard = ref('')
+// source_card keeps whatever the parser read from the statement, so clearing the batch field restores it.
+watch(parsed, (result) => {
+  batchCard.value = ''
+  draft.value = result.rows.map((row) => ({ ...row, shared: true, source_card: row.card_name }))
+})
+const parsedCards = computed(() => [...new Set(draft.value.map((row) => row.source_card).filter(Boolean))])
 const draftTotal = computed(() => sumBy(draft.value, (row) => Number(row.amount) || 0))
 const draftValid = computed(() => draft.value.length > 0 && !parsed.value.errors.length && draft.value.every(rowValid))
 const shared = computed(() => ledger.members.length > 1)
@@ -121,6 +127,10 @@ function money(value) { return `NT$ ${currency.format(value)}` }
 function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0, net: 0 } }
 function rowValid(row) { return !!row.merchant.trim() && typeof row.amount === 'number' && Number.isFinite(row.amount) && row.amount !== 0 }
 function setAllShared(value) { for (const row of draft.value) row.shared = value }
+function applyBatchCard() {
+  const name = batchCard.value.trim()
+  for (const row of draft.value) row.card_name = name || row.source_card
+}
 function methodLabel(value) { return METHODS.find((item) => item.value === value)?.label ?? '信用卡' }
 // Where one member's balance comes from: what they paid, what they owe, and settled transfers.
 const memberDetail = computed(() => {
@@ -448,6 +458,10 @@ async function logout() {
             <strong>預覽：{{ draft.length }} 筆，合計 {{ money(draftTotal) }}</strong>
             <div v-if="shared" class="bulk-actions"><button type="button" @click="setAllShared(true)">全部分帳</button><button type="button" @click="setAllShared(false)">全部個人</button></div>
           </div>
+          <label class="batch-card">
+            <span>這批資料的信用卡暱稱<template v-if="parsedCards.length">（帳單辨識出：{{ parsedCards.join('、') }}）</template></span>
+            <input v-model="batchCard" maxlength="50" :placeholder="parsedCards.length ? '留空就用帳單上的卡別' : '例如：台新 Richart'" @input="applyBatchCard" />
+          </label>
           <div class="edit-list">
             <div v-for="(row, index) in draft" :key="index" class="edit-row" :class="{ invalid: !rowValid(row), personal: shared && !row.shared }">
               <span class="edit-date">{{ dayjs(row.spent_at).format('M/D') }}</span>
@@ -582,6 +596,9 @@ h2 { margin: 0; font-size: 19px; }
 .preview-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
 .bulk-actions { display: flex; gap: 6px; }
 .bulk-actions button { border: 1px solid #3d4d4e; background: transparent; color: #cfe0d4; border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.batch-card { display: grid; gap: 5px; margin: 4px 0 2px; }
+.batch-card span { color: #a8b9ae; font-size: 12px; }
+.batch-card input { height: 36px; border: 1px solid #3d4d4e; border-radius: 9px; background: #0e151d; color: #f0f4ed; padding: 0 11px; font: inherit; font-size: 13px; }
 .edit-list { max-height: 50svh; overflow-y: auto; border: 1px solid #26323a; border-radius: 10px; }
 .edit-row { display: grid; grid-template-columns: 38px 1fr 104px auto; grid-template-areas: 'date merchant merchant remove' '. amount category share'; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid #1e2b33; }
 .edit-row.personal { background: #1a1f2a; }
