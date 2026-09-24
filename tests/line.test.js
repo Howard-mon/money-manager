@@ -235,3 +235,22 @@ test('「下期」會把消費記到下一期帳單，跨年也正確', () => {
   assert.equal(parse(' 今天 好市多 3200').record.billing_month, '2026-10-01')
   assert.equal(parse(' 12/30 尾牙 2000 下期', { today: new Date('2026-12-30T12:00:00+08:00') }).record.billing_month, '2027-01-01')
 })
+
+test('沒有空格也能解析：品項與金額黏在一起、日期黏在前面', () => {
+  assert.deepEqual(
+    ['午餐120', '午餐120元', '今天午餐120', '昨天Uber245', '全聯680 分帳'].map((text) => {
+      const { record } = parse(` ${text}`)
+      return [record.merchant, record.amount, record.spent_at, record.split_among.length]
+    }),
+    [
+      ['午餐', 120, '2026-10-05', 1],
+      ['午餐', 120, '2026-10-05', 1],
+      ['午餐', 120, '2026-10-05', 1],
+      ['Uber', 245, '2026-10-04', 1],
+      ['全聯', 680, '2026-10-05', 2],
+    ],
+  )
+  // 店名本身帶數字時不會被誤拆，仍要求明確金額
+  assert.match(parse(' 7-11').error, /金額/)
+  assert.equal(parse(' 7-11 85').record.merchant, '7-11')
+})

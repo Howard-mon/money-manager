@@ -115,6 +115,28 @@ export function parseExpense(text, context) {
     leftovers.push({ token, index })
   }
 
+  // People type without spaces ("午餐120"、"今天午餐120"). Only a fallback: the prefix must end in a
+  // letter, so a shop like "7-11" is never mistaken for an amount.
+  if (amount === null) {
+    for (let index = leftovers.length - 1; index >= 0; index--) {
+      const glued = leftovers[index].token.match(/^(.*[\p{L}])(\d[\d,]*)(?:元|塊)?$/u)
+      const value = glued && parseAmount(glued[2])
+      if (!value) continue
+      amount = value
+      amountIndex = leftovers[index].index
+      leftovers[index] = { token: glued[1], index: leftovers[index].index }
+      break
+    }
+  }
+  if (!spentAt && leftovers.length) {
+    const first = leftovers[0].token
+    const word = Object.keys(RELATIVE_DAYS).find((day) => first.startsWith(day) && first.length > day.length)
+    if (word) {
+      spentAt = dayjs(today).add(RELATIVE_DAYS[word], 'day')
+      leftovers[0] = { token: first.slice(word.length), index: leftovers[0].index }
+    }
+  }
+
   // "Howard Elly平分": the names sit just before the token carrying 平分. Anything left over after the
   // amount is treated as a name too, so a misspelt member fails loudly instead of ending up in the merchant.
   if (splitMode === 'names') {
