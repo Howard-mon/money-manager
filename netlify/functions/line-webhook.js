@@ -8,7 +8,11 @@ async function reply(replyToken, text, token) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ replyToken, messages: [{ type: 'text', text: text.slice(0, 4900) }] }),
   })
-  if (!response.ok) throw new Error(`LINE reply failed: ${response.status}`)
+  if (!response.ok) {
+    // LINE explains itself in the body ("Invalid reply token" and friends); the status alone is not enough to debug.
+    const detail = await response.text().catch(() => '')
+    throw new Error(`LINE reply failed: ${response.status} ${detail.slice(0, 300)}`)
+  }
 }
 
 export default async (request) => {
@@ -41,10 +45,13 @@ export default async (request) => {
   for (const event of events) {
     try {
       const text = await handleEvent(event, { store, now: new Date() })
-      if (text && event.replyToken) await reply(event.replyToken, text, token)
+      // A redelivered event carries a spent reply token, and LINE's verification sends an all-zero one.
+      const replyable = event.replyToken && !/^0+$/.test(event.replyToken) && !event.deliveryContext?.isRedelivery
+      if (text && replyable) await reply(event.replyToken, text, token)
+      else if (text) console.warn('Skipped reply:', event.type, 'redelivery:', Boolean(event.deliveryContext?.isRedelivery))
     } catch (error) {
       // Never log message content, LINE ids or keys.
-      console.error('LINE event failed:', error.message)
+      console.error('LINE event failed:', error.message, '| event:', event.type, '| redelivery:', Boolean(event.deliveryContext?.isRedelivery))
       if (event.replyToken) await reply(event.replyToken, '系統忙碌中，請稍後再試一次。', token).catch(() => {})
     }
   }
