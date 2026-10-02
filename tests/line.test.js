@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { verifySignature } from '../netlify/functions/lib/signature.js'
 import { handleEvent, hashCode } from '../netlify/functions/lib/handle-event.js'
-import { parseExpense } from '../src/utils/line-message.js'
+import { HELP_TEXT, parseExpense } from '../src/utils/line-message.js'
 import { splitShares } from '../src/utils/split.js'
 
 const HOWARD = '11111111-1111-1111-1111-111111111111'
@@ -253,4 +253,17 @@ test('沒有空格也能解析：品項與金額黏在一起、日期黏在前�
   // 店名本身帶數字時不會被誤拆，仍要求明確金額
   assert.match(parse(' 7-11').error, /金額/)
   assert.equal(parse(' 7-11 85').record.merchant, '7-11')
+})
+
+test('說明裡列出的每個範例都真的解析得過', () => {
+  const demo = [{ user_id: 'M', display_name: '小明' }, { user_id: 'F', display_name: '小美' }]
+  const examples = HELP_TEXT.split('【範例】')[1].split('【')[0].split('\n').filter((line) => line.startsWith('記帳'))
+  assert.ok(examples.length >= 6, '說明應該包含多個範例')
+  for (const example of examples) {
+    const result = parseExpense(example.replace(/^記帳/, ''), {
+      members: demo, defaultSplit: ['M', 'F'], senderUserId: 'M', today: TODAY,
+    })
+    assert.equal(result.error, undefined, `範例無法解析：${example}（${result.error}）`)
+    assert.ok(result.record.merchant && result.record.amount, example)
+  }
 })
