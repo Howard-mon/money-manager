@@ -12,9 +12,11 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { useAuthStore } from '../stores/auth.js'
 import { nameFor, useLedgerStore } from '../stores/ledger.js'
 import { CATEGORIES, METHODS, parsePastedRows } from '../utils/import.js'
+import { groupPayments, paymentKindLabel, paymentSummary } from '../utils/payments.js'
 import { splitShares, splitSummary } from '../utils/split.js'
 import TransactionDialog from '../components/TransactionDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
+import PaymentAccountsDialog from '../components/PaymentAccountsDialog.vue'
 
 use([PieChart, BarChart, CanvasRenderer, GridComponent, LegendComponent, TooltipComponent])
 const router = useRouter()
@@ -26,6 +28,7 @@ const month = ref(dayjs().startOf('month').format('YYYY-MM-DD'))
 const tab = ref('transactions')
 const transactionOpen = ref(false)
 const paymentOpen = ref(false)
+const paymentAccountsOpen = ref(false)
 const importOpen = ref(false)
 const ledgerOpen = ref(false)
 const accountOpen = ref(false)
@@ -49,8 +52,10 @@ const currency = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
 const PALETTE = ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92', '#c4d192', '#d9a6c8', '#889796']
 const total = computed(() => sumBy(ledger.transactions, (tx) => Number(tx.amount)))
 const cardTotal = computed(() => sumBy(ledger.transactions.filter((tx) => (tx.method ?? 'card') === 'card'), (tx) => Number(tx.amount)))
-const paid = computed(() => sumBy(ledger.payments, (payment) => Number(payment.amount)))
-const outstanding = computed(() => cardTotal.value - paid.value)
+const paymentTotals = computed(() => paymentSummary(ledger.payments))
+const cardOutstanding = computed(() => cardTotal.value - paymentTotals.value.creditCard)
+const paymentGroups = computed(() => groupPayments(ledger.payments, ledger.paymentAccounts))
+const activePaymentAccounts = computed(() => ledger.paymentAccounts.filter((account) => account.active))
 const visibleTransactions = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   const rows = ledger.transactions.filter((tx) => {
@@ -168,6 +173,10 @@ async function refresh() {
   catch (error) { $q.notify({ type: 'negative', message: `讀取資料失敗：${error.message}` }) }
 }
 function edit(tx = null) { editing.value = tx; transactionOpen.value = true }
+function openPayment() {
+  if (activePaymentAccounts.value.length) paymentOpen.value = true
+  else paymentAccountsOpen.value = true
+}
 
 async function saveTransaction(record) {
   busy.value = true
@@ -192,6 +201,27 @@ async function savePayment(record) {
     $q.notify({ type: 'positive', message: '繳款已記錄' })
   } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
   finally { busy.value = false }
+}
+async function savePaymentAccount(record) {
+  busy.value = true
+  try {
+    await ledger.savePaymentAccount(record)
+    await refresh()
+    $q.notify({ type: 'positive', message: record.id ? '繳款帳戶已更新' : '繳款帳戶已新增' })
+  } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  finally { busy.value = false }
+}
+async function togglePaymentAccount(id, active) {
+  busy.value = true
+  try {
+    await ledger.setPaymentAccountActive(id, active)
+    await refresh()
+  } catch (error) { $q.notify({ type: 'negative', message: error.message }) }
+  finally { busy.value = false }
+}
+function managePaymentAccounts() {
+  paymentOpen.value = false
+  paymentAccountsOpen.value = true
 }
 function confirmDelete(type, id) {
   $q.dialog({ title: '刪除紀錄？', message: '刪除後無法復原。', cancel: true, persistent: true }).onOk(async () => {
@@ -358,12 +388,12 @@ async function logout() {
         <p>本月總支出</p>
         <div class="balance-value">{{ money(total) }}</div>
         <div class="balance-divider"></div>
-        <div class="balance-row"><div><small>信用卡支出</small><strong>{{ money(cardTotal) }}</strong></div><div><small>已記錄繳款</small><strong>{{ money(paid) }}</strong></div><div><small>卡費減繳款</small><strong>{{ money(outstanding) }}</strong></div></div>
+        <div class="balance-row"><div><small>信用卡支出</small><strong>{{ money(cardTotal) }}</strong></div><div><small>信用卡繳款</small><strong>{{ money(paymentTotals.creditCard) }}</strong><em>{{ cardOutstanding > 0 ? `還差 ${money(cardOutstanding)}` : cardOutstanding < 0 ? `多繳 ${money(-cardOutstanding)}` : '已繳清' }}</em></div><div><small>固定負擔</small><strong>{{ money(paymentTotals.fixed) }}</strong></div></div>
       </section>
 
       <div class="quick-actions">
         <button class="primary-action" @click="edit()"><span class="action-icon">＋</span><span>新增消費</span></button>
-        <button @click="paymentOpen = true"><q-icon name="payments" size="20px" /><span>記錄繳款</span></button>
+        <button @click="openPayment"><q-icon name="payments" size="20px" /><span>記錄繳款</span></button>
         <button @click="importOpen = true"><q-icon name="content_paste" size="20px" /><span>貼上帳單</span></button>
       </div>
 
@@ -427,8 +457,16 @@ async function logout() {
         </section>
       </template>
       <template v-else-if="tab === 'payments'">
-        <div v-if="!ledger.payments.length" class="empty"><q-icon name="payments" size="36px" /><p>尚未記錄繳款</p><button @click="paymentOpen = true">新增繳款</button></div>
-        <div v-for="payment in ledger.payments" :key="payment.id" class="list-row payment-row"><div class="category-icon">✓</div><div class="row-copy"><strong>信用卡繳款</strong><small>{{ dayjs(payment.paid_at).format('YYYY/MM/DD') }}</small></div><div class="row-end"><strong>{{ money(payment.amount) }}</strong><button :aria-label="`刪除 ${payment.paid_at} 繳款`" @click="confirmDelete('payment', payment.id)">刪除</button></div></div>
+        <div class="payment-toolbar">
+          <div><strong>本月共繳 {{ money(paymentTotals.total) }}</strong><small>繳款不會重複計入日常支出</small></div>
+          <button @click="paymentAccountsOpen = true"><q-icon name="settings" size="16px" />管理帳戶</button>
+        </div>
+        <div v-if="!ledger.paymentAccounts.length" class="account-notice"><span>先建立信用卡、房貸或貸款帳戶，就能分類記錄每筆繳款。</span><button @click="paymentAccountsOpen = true">建立帳戶</button></div>
+        <div v-if="!ledger.payments.length" class="empty"><q-icon name="payments" size="36px" /><p>尚未記錄繳款</p><button @click="openPayment">新增繳款</button></div>
+        <section v-for="group in paymentGroups" :key="group.account.id" class="payment-group">
+          <div class="payment-group-head"><div><strong>{{ group.account.name }}</strong><small>{{ paymentKindLabel(group.account.kind) }}</small></div><b>{{ money(group.total) }}</b></div>
+          <div v-for="payment in group.payments" :key="payment.id" class="list-row payment-row"><div class="category-icon">✓</div><div class="row-copy"><strong>{{ group.account.name }}</strong><small>{{ dayjs(payment.paid_at).format('YYYY/MM/DD') }}</small></div><div class="row-end"><strong>{{ money(payment.amount) }}</strong><button :aria-label="`刪除 ${payment.paid_at} ${group.account.name}繳款`" @click="confirmDelete('payment', payment.id)">刪除</button></div></div>
+        </section>
       </template>
       <template v-else-if="tab === 'split'">
         <div v-if="!shared" class="empty"><q-icon name="group_add" size="36px" /><p>這本帳本目前只有你</p><button @click="openLedgerSettings">建立家庭帳本並邀請家人</button></div>
@@ -475,7 +513,8 @@ async function logout() {
     </main>
 
     <TransactionDialog v-model="transactionOpen" :transaction="editing" :month="month" :busy="busy" :members="ledger.members" :me="auth.user?.id" @save="saveTransaction" />
-    <PaymentDialog v-model="paymentOpen" :month="month" :busy="busy" @save="savePayment" />
+    <PaymentDialog v-model="paymentOpen" :month="month" :busy="busy" :accounts="ledger.paymentAccounts" @save="savePayment" @manage-accounts="managePaymentAccounts" />
+    <PaymentAccountsDialog v-model="paymentAccountsOpen" :accounts="ledger.paymentAccounts" :busy="busy" @save="savePaymentAccount" @toggle="togglePaymentAccount" />
     <q-dialog v-model="importOpen" position="bottom">
       <q-card class="import-sheet">
         <div class="sheet-head"><h2>貼上帳單資料</h2><q-btn flat round icon="close" aria-label="關閉" @click="importOpen = false" /></div>
@@ -579,6 +618,7 @@ h1 { font-size: clamp(23px, 5vw, 34px); line-height: 1.3; letter-spacing: -.04em
 .balance-row div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .balance-row small { color: #acc6b5; font-size: 11px; }
 .balance-row strong { font-size: 15px; }
+.balance-row em { color: #9fc0ab; font-size: 10px; font-style: normal; }
 .quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 18px 0 36px; }
 .quick-actions button { min-height: 74px; border: 1px solid #2b3940; background: #17212a; color: #d8e7dc; border-radius: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font: inherit; font-size: 12px; }
 .quick-actions button.primary-action { background: #a8eea0; border-color: #a8eea0; color: #18281a; font-weight: 700; }
@@ -592,6 +632,18 @@ h2 { margin: 0; font-size: 19px; }
 .empty { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #799087; gap: 8px; text-align: center; }
 .empty p { margin: 2px 0; }
 .empty button { background: transparent; color: #a8eea0; border: 0; cursor: pointer; font: inherit; }
+.payment-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.payment-toolbar > div { display: flex; flex-direction: column; gap: 2px; }
+.payment-toolbar strong { font-size: 14px; }
+.payment-toolbar small { color: #84978d; font-size: 11px; }
+.payment-toolbar button, .account-notice button { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid #3c5748; border-radius: 999px; background: #1d2a25; color: #a8eea0; padding: 7px 11px; font: inherit; font-size: 12px; cursor: pointer; }
+.account-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #3c5748; background: #17251f; border-radius: 13px; padding: 13px; color: #b8c9bf; font-size: 12px; }
+.payment-group { margin-top: 17px; }
+.payment-group-head { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 4px 5px; }
+.payment-group-head > div { display: flex; align-items: baseline; gap: 7px; }
+.payment-group-head strong { font-size: 14px; }
+.payment-group-head small { color: #84978d; font-size: 11px; }
+.payment-group-head b { color: #bcd7c4; font-size: 12px; }
 .transaction-group h3 { color: #8d9f96; font-size: 12px; font-weight: 500; margin: 14px 0 5px; }
 .list-row { display: flex; align-items: center; gap: 10px; background: #151d26; border: 1px solid #1e2b33; border-radius: 11px; padding: 8px 11px; margin: 4px 0; min-width: 0; }
 .category-icon { flex: 0 0 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: #293831; color: #b7e7b0; font-size: 12px; font-weight: 700; }

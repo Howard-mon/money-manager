@@ -13,6 +13,7 @@ export const useLedgerStore = defineStore('ledger', () => {
   const currentId = ref(null)
   const transactions = ref([])
   const payments = ref([])
+  const paymentAccounts = ref([])
   const settlements = ref([])
   const statements = ref([])
   const loading = ref(false)
@@ -93,16 +94,22 @@ export const useLedgerStore = defineStore('ledger', () => {
     try {
       const billingMonth = dayjs(month).startOf('month').format('YYYY-MM-DD')
       const inLedger = (table) => supabase.from(table).select('*').eq('ledger_id', currentId.value).eq('billing_month', billingMonth)
-      const [tx, paid, settled, files] = await Promise.all([
+      const [tx, paid, accounts, settled, files] = await Promise.all([
         inLedger('transactions').order('spent_at', { ascending: false }),
         inLedger('payments').order('paid_at', { ascending: false }),
+        supabase.from('payment_accounts').select('*').eq('ledger_id', currentId.value).order('active', { ascending: false }).order('created_at'),
         inLedger('settlements').order('created_at'),
         supabase.storage.from('statements').list(`${userId}/${dayjs(month).format('YYYY-MM')}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
       ])
-      for (const result of [tx, paid, settled, files]) if (result.error) throw result.error
+      for (const result of [tx, paid, accounts, settled, files]) if (result.error) throw result.error
       if (loadId === latestLoad) {
         transactions.value = tx.data ?? []
-        payments.value = paid.data ?? []
+        paymentAccounts.value = accounts.data ?? []
+        const accountById = new Map(paymentAccounts.value.map((account) => [account.id, account]))
+        payments.value = (paid.data ?? []).map((payment) => ({
+          ...payment,
+          payment_account: accountById.get(payment.payment_account_id) ?? null,
+        }))
         settlements.value = settled.data ?? []
         // Storage keeps a 0-byte .emptyFolderPlaceholder when the last file in a folder is deleted.
         statements.value = (files.data ?? []).filter((file) => file.id && !file.name.startsWith('.'))
@@ -144,6 +151,19 @@ export const useLedgerStore = defineStore('ledger', () => {
     if (error) throw error
   }
 
+  async function savePaymentAccount(record) {
+    const payload = { name: record.name.trim(), kind: record.kind, ledger_id: currentId.value }
+    const { error } = record.id
+      ? await supabase.from('payment_accounts').update(payload).eq('id', record.id)
+      : await supabase.from('payment_accounts').insert(payload)
+    if (error) throw error
+  }
+
+  async function setPaymentAccountActive(id, active) {
+    const { error } = await supabase.from('payment_accounts').update({ active }).eq('id', id)
+    if (error) throw error
+  }
+
   async function saveSettlements(transfers, month) {
     const billingMonth = dayjs(month).startOf('month').format('YYYY-MM-DD')
     const { error } = await supabase.from('settlements').insert(transfers.map((t) => ({
@@ -174,9 +194,9 @@ export const useLedgerStore = defineStore('ledger', () => {
   }
 
   return {
-    ledgers, currentId, current, members, transactions, payments, settlements, statements, loading, lineUser, lineGroups,
+    ledgers, currentId, current, members, transactions, payments, paymentAccounts, settlements, statements, loading, lineUser, lineGroups,
     loadLedgers, selectLedger, createLedger, joinLedger, renameMember, load, loadLineStatus, createLineCode,
-    saveTransaction, importTransactions, deleteTransaction, savePayment, deletePayment,
+    saveTransaction, importTransactions, deleteTransaction, savePayment, deletePayment, savePaymentAccount, setPaymentAccountActive,
     saveSettlements, deleteSettlement, uploadStatement, statementUrl,
   }
 })
