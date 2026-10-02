@@ -267,3 +267,39 @@ test('說明裡列出的每個範例都真的解析得過', () => {
     assert.ok(result.record.merchant && result.record.amount, example)
   }
 })
+
+test('重送事件仍會嘗試回覆，且回覆失敗不會中斷其他事件', async () => {
+  process.env.LINE_CHANNEL_SECRET = 'channel-secret'
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = 'access-token'
+  process.env.SUPABASE_URL = 'https://example.supabase.co'
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_for_test'
+  globalThis.WebSocket ??= class {} // Node 20 建立 Supabase client 時需要；Netlify 的 Node 22 內建
+  const { default: webhook } = await import('../netlify/functions/line-webhook.js')
+  const replies = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).includes('api.line.me')) {
+      replies.push(JSON.parse(options.body).replyToken)
+      return new Response('{"message":"Invalid reply token"}', { status: 400 }) // 最壞情況
+    }
+    return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const body = JSON.stringify({
+      destination: 'U0',
+      events: [
+        { type: 'message', webhookEventId: 'redelivered', replyToken: 'tokenA', deliveryContext: { isRedelivery: true }, source: { type: 'user', userId: 'Uany' }, message: { type: 'text', text: '記帳說明' } },
+        { type: 'message', webhookEventId: 'fresh', replyToken: 'tokenB', deliveryContext: { isRedelivery: false }, source: { type: 'user', userId: 'Uany' }, message: { type: 'text', text: '記帳說明' } },
+        { type: 'message', webhookEventId: 'verify', replyToken: '00000000000000000000000000000000', source: { type: 'user', userId: 'Uany' }, message: { type: 'text', text: '記帳說明' } },
+      ],
+    })
+    const signature = createHmac('sha256', 'channel-secret').update(body, 'utf8').digest('base64')
+    const response = await webhook(new Request('https://example.test/api/line/webhook', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': signature }, body,
+    }))
+    assert.equal(response.status, 200)
+    assert.deepEqual(replies, ['tokenA', 'tokenB'], '重送與新事件都要回覆，全為 0 的驗證 token 不回覆')
+  } finally {
+    globalThis.fetch = original
+  }
+})

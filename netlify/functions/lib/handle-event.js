@@ -48,20 +48,21 @@ export async function handleEvent(event, { store, now = new Date() }) {
     return bindCode(bindMatch ? bindMatch[1] : text, { store, now, lineUserId, chatId, isGroup })
   }
 
-  const linked = await store.getLineUser(lineUserId)
+  // Fetched in pairs: LINE redelivers when the webhook answers slowly, so every saved round trip counts.
+  const [linked, group] = await Promise.all([store.getLineUser(lineUserId), isGroup ? store.getLineGroup(chatId) : null])
   if (!linked) return NOT_LINKED
 
-  const ledgerId = isGroup ? (await store.getLineGroup(chatId))?.ledger_id : linked.default_ledger_id
+  const ledgerId = isGroup ? group?.ledger_id : linked.default_ledger_id
   if (isGroup && !ledgerId) return GROUP_NOT_LINKED
   if (!ledgerId) return '還沒設定要記到哪一本帳本。請到網站的「帳本設定 → 連結 LINE」重新產生綁定碼。'
 
-  const members = await store.getMembers(ledgerId)
+  const [members, ledger] = await Promise.all([store.getMembers(ledgerId), store.getLedger(ledgerId)])
   if (!members.some((member) => member.user_id === linked.user_id)) return NOT_MEMBER
 
   if (isUndo) return undo({ store, now, chatId, ledgerId, userId: linked.user_id })
-  if (isStatus) return status({ store, ledgerId, members, isGroup, chatId })
+  if (isStatus) return status({ ledger, members, group, isGroup })
   if (!isExpense) return HELP_TEXT
-  return record({ store, now, event, chatId, ledgerId, members, linked, text, isGroup })
+  return record({ store, now, event, chatId, ledgerId, ledger, members, group, linked, text })
 }
 
 async function bindCode(code, { store, now, lineUserId, chatId, isGroup }) {
@@ -89,8 +90,7 @@ async function bindCode(code, { store, now, lineUserId, chatId, isGroup }) {
   return '這是群組綁定碼，請在要綁定的 LINE 群組裡傳送。'
 }
 
-async function record({ store, now, event, chatId, ledgerId, members, linked, text, isGroup }) {
-  const group = isGroup ? await store.getLineGroup(chatId) : null
+async function record({ store, now, event, chatId, ledgerId, ledger, members, group, linked, text }) {
   const parsed = parseExpense(text.replace(/^記帳/, ''), {
     members,
     defaultSplit: group?.default_split_among ?? [],
@@ -99,7 +99,6 @@ async function record({ store, now, event, chatId, ledgerId, members, linked, te
   })
   if (parsed.error) return `${parsed.error}\n\n傳「記帳說明」看格式。`
 
-  const ledger = await store.getLedger(ledgerId)
   const result = await store.insertTransaction({
     ...parsed.record,
     ledger_id: ledgerId,
@@ -119,11 +118,9 @@ async function undo({ store, now, chatId, ledgerId, userId }) {
   return `已撤銷：${target.merchant}　NT$ ${Number(target.amount).toLocaleString('zh-TW')}`
 }
 
-async function status({ store, ledgerId, members, isGroup, chatId }) {
-  const ledger = await store.getLedger(ledgerId)
+function status({ ledger, members, group, isGroup }) {
   const lines = [`目前帳本：${ledger?.name ?? '未知'}`, `成員：${members.map((member) => member.display_name).join('、')}`]
   if (isGroup) {
-    const group = await store.getLineGroup(chatId)
     const ids = group?.default_split_among ?? []
     const names = ids.map((id) => members.find((member) => member.user_id === id)?.display_name).filter(Boolean)
     lines.push(`「分帳」預設分給：${names.length ? names.join('、') : '全部成員'}`)

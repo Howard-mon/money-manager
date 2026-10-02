@@ -43,16 +43,21 @@ export default async (request) => {
 
   const store = createStore()
   for (const event of events) {
+    let text
     try {
-      const text = await handleEvent(event, { store, now: new Date() })
-      // A redelivered event carries a spent reply token, and LINE's verification sends an all-zero one.
-      const replyable = event.replyToken && !/^0+$/.test(event.replyToken) && !event.deliveryContext?.isRedelivery
-      if (text && replyable) await reply(event.replyToken, text, token)
-      else if (text) console.warn('Skipped reply:', event.type, 'redelivery:', Boolean(event.deliveryContext?.isRedelivery))
+      text = await handleEvent(event, { store, now: new Date() })
     } catch (error) {
       // Never log message content, LINE ids or keys.
-      console.error('LINE event failed:', error.message, '| event:', event.type, '| redelivery:', Boolean(event.deliveryContext?.isRedelivery))
-      if (event.replyToken) await reply(event.replyToken, '系統忙碌中，請稍後再試一次。', token).catch(() => {})
+      console.error('LINE event failed:', error.message, '| event:', event.type)
+      text = '系統忙碌中，請稍後再試一次。'
+    }
+    // Redelivered events are answered too: duplicates are already blocked by the unique line_event_id.
+    // Only LINE's all-zero verification token is skipped, and a dead token must not abort the other events.
+    if (!text || !event.replyToken || /^0+$/.test(event.replyToken)) continue
+    try {
+      await reply(event.replyToken, text, token)
+    } catch (error) {
+      console.warn('Reply dropped:', error.message, '| redelivery:', Boolean(event.deliveryContext?.isRedelivery))
     }
   }
   return new Response('OK')
