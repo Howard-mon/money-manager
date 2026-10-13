@@ -142,6 +142,8 @@ onMounted(async () => {
 
 function money(value) { return `NT$ ${currency.format(value)}` }
 function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0, net: 0, outside: 0 } }
+// 金額一律整數：手動輸入小數時在離開欄位後四捨五入
+function roundAmount(row) { if (Number.isFinite(Number(row.amount))) row.amount = Math.round(Number(row.amount)) }
 function rowValid(row) { return !!row.merchant.trim() && typeof row.amount === 'number' && Number.isFinite(row.amount) && row.amount !== 0 }
 function setAllShared(value) { for (const row of draft.value) row.shared = value }
 function applyBatchCard() {
@@ -545,7 +547,7 @@ async function logout() {
               <span class="edit-date">{{ dayjs(row.spent_at).format('M/D') }}</span>
               <input v-model="row.merchant" class="edit-merchant" maxlength="120" :aria-label="`第 ${index + 1} 筆店家`" />
               <button type="button" class="edit-remove" :aria-label="`不匯入 ${row.merchant}`" @click="draft.splice(index, 1)"><q-icon name="close" size="16px" /></button>
-              <input v-model.number="row.amount" class="edit-amount" type="number" step="0.01" :aria-label="`第 ${index + 1} 筆金額`" />
+              <input v-model.number="row.amount" class="edit-amount" type="number" step="1" inputmode="numeric" :aria-label="`第 ${index + 1} 筆金額`" @change="roundAmount(row)" />
               <select v-model="row.category" class="edit-category" :aria-label="`第 ${index + 1} 筆分類`"><option v-for="name in CATEGORIES" :key="name">{{ name }}</option></select>
               <label v-if="shared" class="edit-share"><input v-model="row.shared" type="checkbox" />{{ row.shared ? '分帳' : '個人' }}</label>
             </div>
