@@ -32,6 +32,8 @@ export function guessCategory(merchant) {
 export function parsePastedRows(text, billingMonth) {
   if (!text.trim()) return { rows: [], errors: [] }
   if (new RegExp(TAISHIN_ROW.source, 'm').test(text)) return parseTaishinStatement(text, billingMonth)
+  // Tabs mean a spreadsheet; anything else is treated as hand-typed lines.
+  if (!text.includes('\t')) return parseLooseRows(text, billingMonth)
   const lines = text.trim().split(/\r?\n/).filter(Boolean)
   if (lines.length > 301) return { rows: [], errors: ['一次最多匯入 300 筆'] }
   const cells = lines.map((line) => line.split('\t').map((value) => value.trim()))
@@ -115,4 +117,56 @@ export function parseTaishinStatement(text, billingMonth) {
   }
   if (pending) skipped.push(pending)
   return { rows, errors: rows.length > 300 ? ['一次最多匯入 300 筆'] : [], skipped }
+}
+
+// 日期可以是西元（2026/9/6、2026-09-06）、民國（115/9/6）或只有月日（9/6，年份取帳單月份）。
+// 不用 dayjs 的格式清單是因為嚴格模式下 M 不吃「09」這種補零寫法。
+function parseLooseDate(token, billingMonth) {
+  const full = String(token ?? '').match(/^(\d{3,4})[/-](\d{1,2})[/-](\d{1,2})$/)
+  const short = String(token ?? '').match(/^(\d{1,2})\/(\d{1,2})$/)
+  if (!full && !short) return null
+  const year = full ? (Number(full[1]) < 1911 ? Number(full[1]) + 1911 : Number(full[1])) : dayjs(billingMonth).year()
+  const [month, day] = full ? [full[2], full[3]] : [short[1], short[2]]
+  const date = dayjs(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, 'YYYY-MM-DD', true)
+  return date.isValid() ? date : null
+}
+
+// Hand-typed lines or other banks' exports: 日期 [入帳日] 店家 金額, separated by spaces.
+// The first field is the date, the last is the amount, everything between is the merchant.
+export function parseLooseRows(text, billingMonth) {
+  const rows = []
+  const errors = []
+  const skipped = []
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (lines.length > 300) return { rows: [], errors: ['一次最多匯入 300 筆'], skipped }
+
+  lines.forEach((line, index) => {
+    const tokens = line.normalize('NFKC').replace(/(\d),(?=\d{3}\b)/g, '$1').split(/[\s,、|]+/).filter(Boolean)
+    const spentAt = parseLooseDate(tokens[0], billingMonth)
+    if (!spentAt) {
+      // A line that looks like data (date-ish first field, number last) must not vanish silently.
+      if (/^[\d/-]+$/.test(tokens[0] ?? '') && tokens.length >= 3) errors.push(`第 ${index + 1} 列：日期「${tokens[0]}」無效`)
+      else skipped.push(line) // 表頭或說明文字
+      return
+    }
+    // A second date is the posting date on bank exports; it carries no information for us.
+    if (tokens.length > 3 && parseLooseDate(tokens[1], billingMonth)) tokens.splice(1, 1)
+    const amount = Math.round(Number(String(tokens.at(-1) ?? '').replace(/NT\$?|元|塊/gi, '')))
+    const merchant = tokens.slice(1, -1).join(' ').trim().slice(0, 120)
+    if (!merchant || !Number.isFinite(amount) || amount === 0) {
+      errors.push(`第 ${index + 1} 列：缺少店家或金額，格式是「日期 店家 金額」`)
+      return
+    }
+    rows.push({
+      spent_at: spentAt.format('YYYY-MM-DD'),
+      billing_month: dayjs(billingMonth).startOf('month').format('YYYY-MM-DD'),
+      merchant,
+      amount,
+      category: guessCategory(merchant),
+      card_name: null,
+      note: null,
+      source: 'paste',
+    })
+  })
+  return { rows, errors: rows.length > 300 ? ['一次最多匯入 300 筆'] : errors, skipped }
 }

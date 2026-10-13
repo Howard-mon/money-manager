@@ -529,7 +529,12 @@ async function logout() {
       <q-card class="import-sheet">
         <div class="sheet-head"><h2>貼上帳單資料</h2><q-btn flat round icon="close" aria-label="關閉" @click="importOpen = false" /></div>
         <p>兩種格式都可以直接貼在下方，所有資料會歸入 {{ dayjs(month).format('YYYY 年 M 月') }}帳單：</p>
-        <ul class="paste-formats"><li><strong>台新信用卡</strong>：在 PDF 帳單反白明細表（可含表頭與卡別那行），複製後貼上</li><li><strong>試算表</strong>：複製「日期、店家、金額」三欄，日期使用 YYYY/MM/DD</li></ul>
+        <ul class="paste-formats">
+          <li><strong>台新帳單</strong>：在 PDF 反白明細表（可含表頭與卡別那行）複製後貼上</li>
+          <li><strong>試算表</strong>：複製「日期、店家、金額」三欄</li>
+          <li><strong>自己打</strong>：一行一筆，<code>日期 店家 金額</code>，用空格分開<br />例：<code>9/6 晚餐 344</code>、<code>2026/09/06 全家 汐止店 120</code></li>
+        </ul>
+        <p class="paste-hint">日期可用 9/6、2026/09/06 或民國 115/09/06；金額可寫 1,200 或 1200元；店家名稱中間有空格沒關係，第一欄是日期、最後一欄是金額，中間全部算店家。</p>
         <textarea v-model="paste" rows="7" placeholder="日期&#9;店家&#9;金額&#10;2026/09/01&#9;早餐&#9;85" aria-label="貼上試算表資料"></textarea>
         <p v-if="parsed.errors.length" class="error" role="alert">{{ parsed.errors.slice(0, 3).join('；') }}</p>
         <div v-else-if="draft.length" class="preview">
@@ -706,6 +711,8 @@ h2 { margin: 0; font-size: 19px; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; }
 .import-sheet p { color: #a8b9ae; line-height: 1.65; font-size: 13px; }
 .paste-formats { color: #a8b9ae; font-size: 12px; line-height: 1.7; margin: -4px 0 12px; padding-left: 18px; }
+.paste-formats code { background: #0e151d; border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+.paste-hint { color: #8ca093; font-size: 11px; line-height: 1.7; margin: -6px 0 12px; }
 .import-sheet { color-scheme: dark; }
 .preview-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
 .preview-span { color: #a2ada1; font-size: 11px; width: 100%; }

@@ -59,3 +59,29 @@ test('依店家自動分類；全形字、Tab 分隔都能辨識，國外手續�
   assert.equal(rows[0].spent_at, '2026-05-31')
   assert.equal(rows[0].card_name, '台新商務卡 0000')
 })
+
+test('手打的通用格式：西元、民國、月日都可，第二個日期視為入帳日', () => {
+  const rows = (text) => parsePastedRows(text, '2026-09-01').rows
+  assert.deepEqual(
+    ['2026/09/06 晚餐 344', '115/09/06 晚餐 344', '9/6 晚餐 344', '2026-09-06 晚餐 344']
+      .map((line) => rows(line)[0].spent_at),
+    ['2026-09-06', '2026-09-06', '2026-09-06', '2026-09-06'],
+  )
+  // 台新帳單的兩個日期，手打也可以照抄：第二個是入帳日，不影響消費日
+  const [twoDates] = rows('2023/08/03 2026/09/09 晚餐 344')
+  assert.equal(twoDates.spent_at, '2023-08-03')
+  assert.equal(twoDates.merchant, '晚餐')
+
+  const [spaced] = rows('2026-09-06 全家便利商店 汐止店 1,200元')
+  assert.equal(spaced.merchant, '全家便利商店 汐止店') // 中間全部當店家
+  assert.equal(spaced.amount, 1200)
+  assert.equal(rows('9/6 退款 -50')[0].amount, -50)
+  assert.equal(rows('9/6 晚餐 344')[0].category, '餐飲') // 一樣會自動分類
+
+  // 表頭略過，但看起來是資料卻日期無效的列要報錯，不能無聲消失
+  const header = parsePastedRows('日期 店家 金額\n2026/09/06 晚餐 344', '2026-09-01')
+  assert.equal(header.rows.length, 1)
+  assert.deepEqual(header.skipped, ['日期 店家 金額'])
+  assert.match(parsePastedRows('2026/02/30 錯誤日期 100', '2026-09-01').errors[0], /日期「2026\/02\/30」無效/)
+  assert.match(parsePastedRows('2026/09/06 晚餐', '2026-09-01').errors[0], /缺少店家或金額/)
+})
