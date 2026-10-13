@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
 import { CATEGORIES, METHODS } from '../utils/import.js'
+import { outsideShare, splitShares } from '../utils/split.js'
 
 const props = defineProps({ modelValue: Boolean, transaction: { type: Object, default: null }, month: { type: String, required: true }, busy: Boolean, members: { type: Array, default: () => [] }, me: { type: String, default: null } })
 const emit = defineEmits(['update:modelValue', 'save'])
@@ -18,9 +19,14 @@ const billingShift = ref(0)
 const note = ref('')
 const paidBy = ref(null)
 const splitAmong = ref([])
+const outsideCount = ref(0)
 const memberOptions = computed(() => props.members.map((member) => ({ label: member.display_name, value: member.user_id })))
 const shared = computed(() => props.members.length > 1)
-const perPerson = computed(() => Math.round(Number(amount.value) / splitAmong.value.length))
+const splitPreview = computed(() => {
+  const draft = { amount: Number(amount.value) || 0, split_among: splitAmong.value, outside_count: outsideCount.value }
+  if (!draft.split_among.length) return null
+  return { people: draft.split_among.length + outsideCount.value, each: Object.values(splitShares(draft))[0] ?? 0, outside: outsideShare(draft) }
+})
 
 watch(() => props.modelValue, (value) => {
   if (!value) return
@@ -35,6 +41,7 @@ watch(() => props.modelValue, (value) => {
   note.value = tx?.note ?? ''
   paidBy.value = tx?.paid_by ?? props.me
   splitAmong.value = tx?.split_among ?? props.members.map((member) => member.user_id)
+  outsideCount.value = tx?.outside_count ?? 0
 })
 
 function submit() {
@@ -51,6 +58,7 @@ function submit() {
     note: note.value.trim() || null,
     paid_by: paidBy.value,
     split_among: splitAmong.value,
+    outside_count: outsideCount.value,
     source: props.transaction?.source ?? 'manual',
   })
 }
@@ -70,10 +78,21 @@ function submit() {
         <template v-if="shared">
           <label>誰付的</label>
           <q-select v-model="paidBy" outlined dense emit-value map-options :options="memberOptions" />
-          <label>分給誰<template v-if="splitAmong.length && Number(amount)">（{{ splitAmong.length }} 人，每人約 NT$ {{ perPerson }}）</template></label>
+          <label>分給誰</label>
           <q-option-group v-model="splitAmong" type="checkbox" inline :options="memberOptions" />
           <p v-if="!splitAmong.length" class="error" role="alert">至少選一位分攤成員</p>
         </template>
+        <label>再加幾位帳本外的人一起分？</label>
+        <div class="outside-row">
+          <button type="button" :disabled="outsideCount < 1" aria-label="減少人數" @click="outsideCount = Math.max(0, outsideCount - 1)">−</button>
+          <input v-model.number="outsideCount" type="number" min="0" max="50" inputmode="numeric" aria-label="帳本外的人數" />
+          <button type="button" :disabled="outsideCount > 49" aria-label="增加人數" @click="outsideCount = Math.min(50, outsideCount + 1)">＋</button>
+          <span>位非成員</span>
+        </div>
+        <p v-if="splitPreview && Number(amount)" class="hint">
+          共 {{ splitPreview.people }} 份，每份 NT$ {{ splitPreview.each }}。
+          <template v-if="splitPreview.outside">其中非成員 {{ outsideCount }} 份合計 NT$ {{ splitPreview.outside }}，記為付款人代墊。</template>
+        </p>
         <label>付款方式</label>
         <q-btn-toggle v-model="method" no-caps unelevated spread toggle-color="primary" text-color="white" color="dark" :options="METHODS" />
         <div class="row-fields">
@@ -102,6 +121,11 @@ h2 { font-size: 20px; margin: 0; }
 label { display: block; color: #aebdb8; font-size: 12px; margin: 16px 0 8px; }
 .row-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .error { color: #ffaaa0; font-size: 12px; margin: 6px 0 0; }
+.outside-row { display: flex; align-items: center; gap: 8px; }
+.outside-row button { width: 38px; height: 38px; border: 1px solid #3d4d4e; background: #0e151d; color: #cfe0d4; border-radius: 10px; font: inherit; font-size: 18px; cursor: pointer; }
+.outside-row button:disabled { opacity: .4; cursor: default; }
+.outside-row input { width: 68px; height: 38px; border: 1px solid #3d4d4e; border-radius: 10px; background: #0e151d; color: #f0f4ed; text-align: center; font: inherit; font-size: 15px; }
+.outside-row span { color: #aebdb8; font-size: 13px; }
 .billing-chips { display: flex; gap: 6px; }
 .billing-chips button { flex: 1; border: 1px solid #3d4d4e; background: #0e151d; color: #cfe0d4; border-radius: 10px; padding: 8px 4px; font: inherit; font-size: 13px; cursor: pointer; }
 .billing-chips button.active { background: #263832; border-color: #3c5748; color: #c1f2ad; font-weight: 700; }

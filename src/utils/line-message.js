@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 import customParseFormat from 'dayjs/plugin/customParseFormat.js'
 import { guessCategory } from './import.js'
-import { splitShares } from './split.js'
+import { outsideShare, splitShares } from './split.js'
 
 dayjs.extend(customParseFormat)
 
@@ -43,7 +43,9 @@ export const HELP_TEXT = [
   '　餐飲 交通 購物 生活 娛樂 訂閱 貓咪 醫療 其他',
   '⑧ 卡片｜選填，只有信用卡會記',
   '　卡片:台新',
-  '⑨ 帳單期別｜預設消費當月',
+  '⑨ 分攤人數｜含帳本外的人時才需要',
+  '　9人分＝這筆分成 9 份，帳本成員以外的份數算付款人代墊',
+  '⑩ 帳單期別｜預設消費當月',
   '　下期＝算進下一期帳單，今天刷的卡通常用這個',
   '',
   '【兩個提醒】',
@@ -57,6 +59,7 @@ export const HELP_TEXT = [
   '記帳 9/20 Netflix 399 #訂閱',
   '記帳 好市多 3200 卡片:台新 分帳 下期',
   '記帳 火鍋 1215 小美付 小明 小美平分',
+  '記帳 中秋食材 3600 9人分 分帳',
   '',
   '【其他指令】',
   '撤銷｜刪掉自己 10 分鐘內記的最後一筆',
@@ -119,6 +122,7 @@ export function parseExpense(text, context) {
   let splitMode = null
   let splitNames = null
   let billingShift = 0
+  let totalPeople = null
 
   for (const [index, token] of tokens.entries()) {
     if (!spentAt) {
@@ -136,6 +140,9 @@ export function parseExpense(text, context) {
     const card = token.match(/^(卡片|卡別|信用卡)[:：](.+)$/)
     if (card) { cardName = card[2]; continue }
     if (token in BILLING_SHIFT) { billingShift = BILLING_SHIFT[token]; continue }
+    // "9人分"：含帳本外的人在內的總份數
+    const headcount = token.match(/^分?(\d{1,2})\s*(?:人分?|份)$/)
+    if (headcount) { totalPeople = Number(headcount[1]); continue }
     if (token === '分帳' || token === '平分') { splitMode = 'default'; continue }
     if (token === '全部平分' || token === '全部分帳' || token === '大家平分') { splitMode = 'all'; continue }
     const named = token.match(/^(.+?)平分$/)
@@ -199,6 +206,15 @@ export function parseExpense(text, context) {
   }
   if (!splitAmong.length) return { error: '找不到要分攤的成員，請改用「全部平分」或指定成員。' }
 
+  // Anyone beyond the ledger members is counted as an outside share the payer fronts.
+  let outsideCount = 0
+  if (totalPeople !== null) {
+    if (totalPeople < splitAmong.length) {
+      return { error: `分攤人數 ${totalPeople} 比選到的成員 ${splitAmong.length} 人還少，請確認寫法。` }
+    }
+    outsideCount = totalPeople - splitAmong.length
+  }
+
   const date = spentAt ?? dayjs(today)
   return {
     record: {
@@ -211,6 +227,7 @@ export function parseExpense(text, context) {
       method: method ?? 'card',
       paid_by: paidBy,
       split_among: splitAmong,
+      outside_count: outsideCount,
       source: 'line',
     },
   }
@@ -225,6 +242,10 @@ export function formatReceipt({ ledgerName, record, members }) {
     `${dayjs(record.spent_at).format('M/D')}・${record.category}${record.card_name ? `・${record.card_name}` : ''}`,
     `${nameOf(record.paid_by)}付・${METHOD_LABELS[record.method]}・計入 ${dayjs(record.billing_month).format('M 月')}帳單`,
   ]
+  if (record.outside_count) {
+    const outside = outsideShare(record)
+    lines.push(`共 ${record.split_among.length + record.outside_count} 份，其中 ${record.outside_count} 位非成員 ${outside.toLocaleString('zh-TW')} 由付款人代墊`)
+  }
   if (record.split_among.length > 1) {
     lines.push(`分攤：${record.split_among.map((id) => `${nameOf(id)} ${shares[id].toLocaleString('zh-TW')}`).join('、')}`)
   }

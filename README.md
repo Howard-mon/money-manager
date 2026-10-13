@@ -19,6 +19,7 @@
 - 每筆消費可標記信用卡、現金或轉帳；圖示顏色區分（信用卡綠色、現金與轉帳琥珀色），可依付款方式篩選
 - 摘要區分總支出與信用卡支出
 - 分帳頁點成員可看該成員的明細：每筆他付了多少、分攤多少、淨額從哪裡來
+- 單筆可加入帳本外的人一起均分（例如 9 人分食材、帳本裡只有 2 人），非成員那幾份記為付款人代墊
 - LINE 機器人記帳：一對一或群組傳「記帳 午餐 120 分帳」即可寫入帳本，支援撤銷
 - 帳號設定：顯示名稱、更改密碼、忘記密碼
 - 多本帳本：用邀請連結邀請家人加入，每筆消費可記「誰付的、分給誰」（平均分攤），分帳頁算出誰該給誰多少，按「月結」記為已付款
@@ -26,7 +27,7 @@
 ## 你需要建立的服務
 
 1. **Supabase Free 專案**：以自己的帳號註冊，建立一個新 project。區域建議選靠近台灣的可用區域。請自行妥善保存 Supabase 帳號密碼與資料庫密碼。
-2. 在 Supabase 的 **SQL Editor** 依序執行 `supabase/schema.sql`、`supabase/002_shared_ledgers.sql` 、`supabase/003_member_rename.sql`、`supabase/004_payment_method.sql`、`supabase/005_line_bot.sql` 與 `supabase/006_payment_accounts.sql`（依編號順序，各執行一次）。會建立資料表、共享帳本、私人 PDF bucket 與 RLS 存取規則。
+2. 在 Supabase 的 **SQL Editor** 依序執行 `supabase/schema.sql`、`supabase/002_shared_ledgers.sql` 、`supabase/003_member_rename.sql`、`supabase/004_payment_method.sql`、`supabase/005_line_bot.sql` 、`supabase/006_payment_accounts.sql` 與 `supabase/007_outside_split.sql`（依編號順序，各執行一次）。會建立資料表、共享帳本、私人 PDF bucket 與 RLS 存取規則。
 3. 在 **Project Settings → API** 複製 Project URL 與 publishable key。只使用 publishable key，**不要提供 service_role／secret key、資料庫密碼或 Gmail 密碼**。
 4. 在 **Authentication → URL Configuration** 設定 Site URL 為 Netlify 網址；加入本機 `http://localhost:5173/**` 與正式網址作為允許的 redirect URL。註冊信驗證連結要能回到網站。
 5. **Netlify Free**：註冊並連接此專案的 Git repository。Build command: `npm run build`；Publish directory: `dist`。在 Site 的 Environment variables 設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY`。環境變數變更後重新部署。
@@ -128,6 +129,7 @@ https://<你的網域>/api/line/webhook
 | 付款人 | | `小美付`，名稱需與帳本顯示名稱相同 | 發訊者 |
 | 分類 | | `#餐飲` 或 `分類:餐飲`，共 9 類 | `guessCategory` 自動判斷 |
 | 卡片 | | `卡片:台新`，付款方式為現金或轉帳時會忽略 | 無 |
+| 分攤人數 | | `9人分`、`分9份`：含帳本外的人在內的總份數，超出成員的部分算代墊 | 僅選到的成員 |
 | 帳單期別 | | `下期`（記到下一期帳單）／`本期` | 消費當月 |
 
 兩個限制：名稱找不到或重複時不會寫入，機器人會回覆請你修正；使用 `小明 小美平分` 時，金額之後的字一律視為人名，所以項目要寫在金額前面。

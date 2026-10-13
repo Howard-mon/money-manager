@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto'
 import { verifySignature } from '../netlify/functions/lib/signature.js'
 import { handleEvent, hashCode } from '../netlify/functions/lib/handle-event.js'
 import { HELP_TEXT, parseExpense } from '../src/utils/line-message.js'
-import { splitShares } from '../src/utils/split.js'
+import { outsideShare, splitShares } from '../src/utils/split.js'
 
 const HOWARD = '11111111-1111-1111-1111-111111111111'
 const ELLY = '22222222-2222-2222-2222-222222222222'
@@ -302,4 +302,16 @@ test('重送事件仍會嘗試回覆，且回覆失敗不會中斷其他事件',
   } finally {
     globalThis.fetch = original
   }
+})
+
+test('「9人分」把帳本外的人算成代墊份數', () => {
+  const { record } = parse(' 中秋食材 3600 9人分 分帳')
+  assert.equal(record.outside_count, 7) // 9 份扣掉帳本裡的 2 人
+  assert.deepEqual(splitShares(record), { [HOWARD]: 400, [ELLY]: 400 })
+  assert.equal(outsideShare(record), 2800)
+
+  assert.equal(parse(' 聚餐 900 3人分').record.outside_count, 2) // 未指定分攤時只有自己
+  assert.equal(parse(' 聚餐 900 分3份 分帳').record.outside_count, 1)
+  assert.equal(parse(' 午餐 120 分帳').record.outside_count, 0)
+  assert.match(parse(' 聚餐 900 1人分 分帳').error, /比選到的成員/)
 })

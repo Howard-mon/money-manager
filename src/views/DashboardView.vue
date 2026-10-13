@@ -13,7 +13,7 @@ import { useAuthStore } from '../stores/auth.js'
 import { nameFor, useLedgerStore } from '../stores/ledger.js'
 import { CATEGORIES, METHODS, parsePastedRows } from '../utils/import.js'
 import { groupPayments, paymentKindLabel, paymentSummary } from '../utils/payments.js'
-import { splitShares, splitSummary } from '../utils/split.js'
+import { outsideShare, splitShares, splitSummary } from '../utils/split.js'
 import TransactionDialog from '../components/TransactionDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import PaymentAccountsDialog from '../components/PaymentAccountsDialog.vue'
@@ -53,6 +53,8 @@ const PALETTE = ['#a8eea0', '#77c3b7', '#b6a2e5', '#ebbd7e', '#79a8df', '#e88f92
 const total = computed(() => sumBy(ledger.transactions, (tx) => Number(tx.amount)))
 const cardTotal = computed(() => sumBy(ledger.transactions.filter((tx) => (tx.method ?? 'card') === 'card'), (tx) => Number(tx.amount)))
 const paymentTotals = computed(() => paymentSummary(ledger.payments))
+// Money the payer fronted for people outside the ledger; it is part of the bill but not household spending.
+const outsideTotal = computed(() => sumBy(ledger.transactions, outsideShare))
 const cardOutstanding = computed(() => cardTotal.value - paymentTotals.value.creditCard)
 const paymentGroups = computed(() => groupPayments(ledger.payments, ledger.paymentAccounts))
 const activePaymentAccounts = computed(() => ledger.paymentAccounts.filter((account) => account.active))
@@ -139,7 +141,7 @@ onMounted(async () => {
 })
 
 function money(value) { return `NT$ ${currency.format(value)}` }
-function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0, net: 0 } }
+function balanceOf(id) { return summary.value.people[id] ?? { paid: 0, share: 0, net: 0, outside: 0 } }
 function rowValid(row) { return !!row.merchant.trim() && typeof row.amount === 'number' && Number.isFinite(row.amount) && row.amount !== 0 }
 function setAllShared(value) { for (const row of draft.value) row.shared = value }
 function applyBatchCard() {
@@ -156,7 +158,11 @@ const memberDetail = computed(() => {
     .map((tx) => {
       const paid = tx.paid_by === id ? Number(tx.amount) : 0
       const share = splitShares(tx)[id] ?? 0
-      return { id: tx.id, spent_at: tx.spent_at, merchant: tx.merchant, category: tx.category, method: tx.method, paid, share, net: paid - share, people: tx.split_among.length }
+      return {
+        id: tx.id, spent_at: tx.spent_at, merchant: tx.merchant, category: tx.category, method: tx.method,
+        paid, share, net: paid - share, people: tx.split_among.length + (tx.outside_count ?? 0),
+        outside: tx.paid_by === id ? outsideShare(tx) : 0,
+      }
     })
   const transfers = ledger.settlements.filter((item) => item.from_user === id || item.to_user === id)
   return { lines, transfers, balance: balanceOf(id), name: memberName(id) }
@@ -387,6 +393,7 @@ async function logout() {
         <svg class="balance-decor" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 0c4 30 16 46 50 50-34 4-46 20-50 50-4-30-16-46-50-50 34-4 46-20 50-50Z" /></svg>
         <p>本月總支出</p>
         <div class="balance-value">{{ money(total) }}</div>
+        <p v-if="outsideTotal" class="balance-note">含代墊 {{ money(outsideTotal) }}，實際負擔 {{ money(total - outsideTotal) }}</p>
         <div class="balance-divider"></div>
         <div class="balance-row"><div><small>信用卡支出</small><strong>{{ money(cardTotal) }}</strong></div><div><small>信用卡繳款</small><strong>{{ money(paymentTotals.creditCard) }}</strong><em>{{ cardOutstanding > 0 ? `還差 ${money(cardOutstanding)}` : cardOutstanding < 0 ? `多繳 ${money(-cardOutstanding)}` : '已繳清' }}</em></div><div><small>固定負擔</small><strong>{{ money(paymentTotals.fixed) }}</strong></div></div>
       </section>
@@ -426,7 +433,7 @@ async function logout() {
             <h3>{{ dayjs(date).format('M 月 D 日・ddd') }}</h3>
             <div v-for="tx in rows" :key="tx.id" class="list-row">
               <div class="category-icon" :class="(tx.method ?? 'card') === 'card' ? 'card' : 'cashlike'" :title="methodLabel(tx.method)">{{ tx.category?.[0] || '記' }}</div>
-              <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="tx.card_name"> · {{ tx.card_name }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付，{{ tx.split_among.length }} 人分</template></small></div>
+              <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="tx.card_name"> · {{ tx.card_name }}</template><template v-if="shared || tx.outside_count"> · {{ memberName(tx.paid_by) }}付，{{ tx.split_among.length + (tx.outside_count ?? 0) }} 人分<template v-if="tx.outside_count">（含 {{ tx.outside_count }} 位非成員）</template></template></small></div>
               <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
             </div>
           </section>
@@ -434,7 +441,7 @@ async function logout() {
         <template v-else>
           <div v-for="tx in visibleTransactions" :key="tx.id" class="list-row">
             <div class="category-icon" :class="(tx.method ?? 'card') === 'card' ? 'card' : 'cashlike'" :title="methodLabel(tx.method)">{{ tx.category?.[0] || '記' }}</div>
-            <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ dayjs(tx.spent_at).format('M/D') }} · {{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="shared"> · {{ memberName(tx.paid_by) }}付</template></small></div>
+            <div class="row-copy"><strong>{{ tx.merchant }}</strong><small>{{ dayjs(tx.spent_at).format('M/D') }} · {{ tx.category }}<template v-if="(tx.method ?? 'card') !== 'card'"> · {{ methodLabel(tx.method) }}</template><template v-if="shared || tx.outside_count"> · {{ memberName(tx.paid_by) }}付<template v-if="tx.outside_count">，含 {{ tx.outside_count }} 位非成員</template></template></small></div>
             <div class="row-end"><strong>{{ money(tx.amount) }}</strong><div class="row-buttons"><button :aria-label="`編輯 ${tx.merchant}`" @click="edit(tx)">編輯</button><button :aria-label="`刪除 ${tx.merchant}`" @click="confirmDelete('transaction', tx.id)">刪除</button></div></div>
           </div>
         </template>
@@ -475,11 +482,12 @@ async function logout() {
           <div class="detail-summary">
             <div><small>已付</small><strong>{{ money(memberDetail.balance.paid) }}</strong></div>
             <div><small>應分攤</small><strong>{{ money(memberDetail.balance.share) }}</strong></div>
+            <div v-if="memberDetail.balance.outside"><small>其中代墊</small><strong>{{ money(memberDetail.balance.outside) }}</strong></div>
             <div><small>{{ memberDetail.balance.net > 0 ? '應收' : memberDetail.balance.net < 0 ? '應付' : '已平衡' }}</small><strong :class="{ owed: memberDetail.balance.net > 0, owes: memberDetail.balance.net < 0 }">{{ money(Math.abs(memberDetail.balance.net)) }}</strong></div>
           </div>
           <div v-for="line in memberDetail.lines" :key="line.id" class="list-row">
             <div class="category-icon" :class="(line.method ?? 'card') === 'card' ? 'card' : 'cashlike'">{{ line.category?.[0] || '記' }}</div>
-            <div class="row-copy"><strong>{{ line.merchant }}</strong><small>{{ dayjs(line.spent_at).format('M/D') }} · {{ line.paid ? `他付 ${currency.format(line.paid)}` : '別人付' }} · {{ line.people }} 人分攤 {{ currency.format(line.share) }}</small></div>
+            <div class="row-copy"><strong>{{ line.merchant }}</strong><small>{{ dayjs(line.spent_at).format('M/D') }} · {{ line.paid ? `他付 ${currency.format(line.paid)}` : '別人付' }} · {{ line.people }} 人分攤 {{ currency.format(line.share) }}<template v-if="line.outside"> · 代墊 {{ currency.format(line.outside) }}</template></small></div>
             <div class="row-end"><strong :class="{ owed: line.net > 0, owes: line.net < 0 }">{{ line.net > 0 ? '+' : '' }}{{ money(line.net) }}</strong></div>
           </div>
           <template v-if="memberDetail.transfers.length">
@@ -491,7 +499,7 @@ async function logout() {
         <template v-else>
           <button v-for="member in ledger.members" :key="member.user_id" class="list-row member-row" @click="splitMember = member.user_id">
             <div class="category-icon">{{ member.display_name[0] }}</div>
-            <div class="row-copy"><strong>{{ member.display_name }}</strong><small>已付 {{ money(balanceOf(member.user_id).paid) }} · 應分攤 {{ money(balanceOf(member.user_id).share) }}</small></div>
+            <div class="row-copy"><strong>{{ member.display_name }}</strong><small>已付 {{ money(balanceOf(member.user_id).paid) }} · 應分攤 {{ money(balanceOf(member.user_id).share) }}<template v-if="balanceOf(member.user_id).outside"> · 代墊 {{ money(balanceOf(member.user_id).outside) }}</template></small></div>
             <div class="row-end"><strong :class="{ owed: balanceOf(member.user_id).net > 0, owes: balanceOf(member.user_id).net < 0 }">{{ balanceOf(member.user_id).net > 0 ? '應收' : balanceOf(member.user_id).net < 0 ? '應付' : '已平衡' }} {{ money(Math.abs(balanceOf(member.user_id).net)) }}</strong></div>
             <q-icon name="chevron_right" size="18px" class="member-chevron" />
           </button>
@@ -612,6 +620,7 @@ h1 { font-size: clamp(23px, 5vw, 34px); line-height: 1.3; letter-spacing: -.04em
 .balance-card { position: relative; overflow: hidden; background: linear-gradient(135deg, #253d33, #1d352f 54%, #233c48); border: 1px solid #3c5748; border-radius: 20px; padding: 23px 24px 22px; }
 .balance-card p { color: #bdd8c7; font-size: 13px; margin: 0 0 12px; }
 .balance-value { font-size: clamp(30px, 8vw, 47px); font-weight: 700; letter-spacing: -.045em; line-height: 1.2; }
+.balance-note { color: #bdd8c7 !important; font-size: 11px; margin: 6px 0 0 !important; }
 .balance-decor { position: absolute; right: -14px; top: -26px; width: 150px; height: 150px; fill: #ffffff0f; pointer-events: none; }
 .balance-divider { border-top: 1px solid #ffffff2b; margin: 22px 0 17px; }
 .balance-row { display: flex; gap: 30px; }
