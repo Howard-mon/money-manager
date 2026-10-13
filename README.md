@@ -81,7 +81,7 @@ https://<你的網域>/api/line/webhook
 
 1. **Webhook URL**：填入上方網址後按 **Verify**，應回傳成功（空事件會回 200）。
 2. **Use webhook**：開啟。
-3. **Webhook redelivery**：可開啟。重送的事件帶有相同的 `webhookEventId`，資料庫的唯一索引會擋下重複記帳。
+3. **Webhook redelivery**：可開啟。重送的事件帶有相同的 `webhookEventId`，資料庫的唯一索引會擋下重複記帳。Function 會先回 200 再用 `context.waitUntil` 背景處理，避免 LINE 判定逾時而重送；重送事件的 reply token 多半已失效，回覆失敗只會記錄在日誌。
 4. **Allow bot to join group chats**：要在群組使用就必須開啟。
 5. 建議關閉 **Auto-reply messages** 與 **Greeting messages**，避免蓋掉機器人的回覆。
 

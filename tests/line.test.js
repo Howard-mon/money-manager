@@ -315,3 +315,44 @@ test('「9人分」把帳本外的人算成代墊份數', () => {
   assert.equal(parse(' 午餐 120 分帳').record.outside_count, 0)
   assert.match(parse(' 聚餐 900 1人分 分帳').error, /比選到的成員/)
 })
+
+test('先回 200 再處理：有 waitUntil 時立即回應，暫時性錯誤會重試一次', async () => {
+  process.env.LINE_CHANNEL_SECRET = 'channel-secret'
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = 'access-token'
+  process.env.SUPABASE_URL = 'https://example.supabase.co'
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_for_test'
+  globalThis.WebSocket ??= class {}
+  const { default: webhook } = await import('../netlify/functions/line-webhook.js')
+  const original = globalThis.fetch
+  let supabaseCalls = 0
+  const replies = []
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).includes('api.line.me')) {
+      replies.push(JSON.parse(options.body).messages[0].text)
+      return new Response('{}', { status: 200 })
+    }
+    supabaseCalls += 1
+    // 第一次模擬 Supabase 的暫時性錯誤，重試時成功
+    if (supabaseCalls === 1) return new Response('{"message":"JWT issued at future"}', { status: 401 })
+    return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const body = JSON.stringify({
+      destination: 'U0',
+      events: [{ type: 'message', webhookEventId: 'e1', replyToken: 'tokenA', source: { type: 'user', userId: 'Uany' }, message: { type: 'text', text: '記帳 午餐 120' } }],
+    })
+    const signature = createHmac('sha256', 'channel-secret').update(body, 'utf8').digest('base64')
+    const pending = []
+    const response = await webhook(
+      new Request('https://example.test/api/line/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': signature }, body }),
+      { waitUntil: (promise) => pending.push(promise) },
+    )
+    assert.equal(response.status, 200)
+    assert.equal(replies.length, 0, '回應 LINE 時還不該等工作做完')
+    await Promise.all(pending)
+    assert.equal(replies.length, 1)
+    assert.doesNotMatch(replies[0], /系統忙碌中/, '重試成功後不該回系統忙碌中')
+  } finally {
+    globalThis.fetch = original
+  }
+})
